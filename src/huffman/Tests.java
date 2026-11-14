@@ -130,9 +130,10 @@ public class Tests {
             );
 
             // ==============================================================
-            // PART 4: BIG-FILE TEST (~40 KB, 3-BYTE VARINT FREQUENCY)
+            // PART 4: BENCHMARK TESTS (NATURAL ~42 KB & SYNTHETIC ~40 KB)
             // ==============================================================
-            System.out.println("\n--- Part 4: Big-File Test (~40 KB, 3-Byte Varint) ---");
+            System.out.println("\n--- Part 4: Benchmark Tests (Natural Text & Synthetic Big-File) ---");
+            runNaturalFileTest(tempDir);
             runBigFileTest(tempDir);
 
             // ==============================================================
@@ -271,6 +272,67 @@ public class Tests {
             } else {
                 printResult(testName, false, "Text mismatch after decompression");
             }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Tests round-trip compression and decompression for natural_input.txt (~42 KB real public-domain prose).
+     */
+    private static void runNaturalFileTest(Path tempDir) {
+        totalTests++;
+        String testName = "Natural-Text: natural_input.txt (~42 KB real prose)";
+        String naturalInputPath = "natural_input.txt";
+        String huffPath = tempDir.resolve("natural_input.huff").toString();
+        String restoredPath = tempDir.resolve("natural_input_restored.txt").toString();
+
+        try {
+            String originalText = FileHandler.readTextFile(naturalInputPath);
+            if (originalText == null) {
+                printResult(testName, false, "Could not find " + naturalInputPath);
+                return;
+            }
+
+            byte[] rawBytes = originalText.getBytes(StandardCharsets.UTF_8);
+            Map<Character, Integer> freqs = FrequencyCounter.countFrequencies(originalText);
+
+            HuffmanTree tree = new HuffmanTree(freqs);
+            Map<Character, String> codeMap = CodeGenerator.generateCodes(tree);
+            Compressor.CompressionResult result = Compressor.compress(originalText, codeMap);
+
+            byte selectedMode = FileHandler.writeAutoCompressedFile(huffPath, rawBytes, freqs, result.paddingBits(), result.compressedBytes());
+
+            if (selectedMode != FileHandler.MODE_HUFFMAN) {
+                printResult(testName, false, "Expected Flag 1 (Huffman Mode) for ~42 KB natural file, got: " + selectedMode);
+                return;
+            }
+
+            FileHandler.CompressedFileData fileData = FileHandler.readCompressedFile(huffPath);
+            if (fileData == null) {
+                printResult(testName, false, "Failed to read compressed file " + huffPath);
+                return;
+            }
+
+            String restoredText = Decompressor.decompress(fileData);
+            FileHandler.writeTextFile(restoredPath, restoredText);
+            String savedRestored = FileHandler.readTextFile(restoredPath);
+
+            boolean matches = originalText.equals(restoredText) && originalText.equals(savedRestored);
+            if (!matches) {
+                printResult(testName, false, "Decompressed text does not match original natural_input.txt byte-for-byte");
+                return;
+            }
+
+            long origSize = FileHandler.getFileSize(naturalInputPath);
+            long compSize = FileHandler.getFileSize(huffPath);
+            long payloadSize = result.compressedBytes().length;
+            long headerSize = compSize - payloadSize;
+            CompressionStats stats = new CompressionStats(selectedMode, origSize, compSize, headerSize, payloadSize);
+
+            passedTests++;
+            printResult(testName, true, String.format("Byte-for-byte match! Orig: %,d B, Comp: %,d B (Hdr: %,d B, Payload: %,d B), Ratio: %.4f, Saved: %.2f%%",
+                    origSize, compSize, headerSize, payloadSize, stats.getCompressionRatio(), stats.getSpaceSavedPercentage()));
         } catch (Exception e) {
             printResult(testName, false, "Exception: " + e.getMessage());
         }

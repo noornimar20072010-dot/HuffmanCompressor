@@ -29,9 +29,10 @@ HuffmanCompressor/
 │       ├── HuffmanNode.java       # Binary tree node (character, frequency, left, right)
 │       ├── HuffmanTree.java       # Tree builder using PriorityQueue (handles edge cases)
 │       ├── Main.java              # Interactive CLI menu loop (validate input, resilient to bad paths)
-│       └── Tests.java             # Comprehensive 21-test validation suite (no JUnit)
-├── input.txt                      # Sample text file (319 bytes)
-├── big_input.txt                  # Large diverse English text file (~40 KB)
+│       └── Tests.java             # Comprehensive 22-test validation suite (no JUnit)
+├── input.txt                      # Short sample text file (319 bytes)
+├── natural_input.txt              # Authentic natural English prose (~42 KB from Arthur Conan Doyle)
+├── big_input.txt                  # Synthetic test file (~40 KB) exercising 3-byte varint frequencies
 ├── .gitignore                     # Git ignore rules (bin/, *.huff, temp files)
 └── README.md                      # Complete documentation and usage guide
 ```
@@ -49,7 +50,7 @@ Every `.huff` file begins with a 1-byte mode flag:
 ### 1. Stored Mode (Flag 0)
 Used when compressed size would be $\ge$ original UTF-8 size:
 ```
-[ Byte 0 ] : 0x00 (Flag 0)
+[ Byte 0 ]     : 0x00 (Flag 0)
 [ Bytes 1..N ] : Raw UTF-8 payload bytes
 ```
 
@@ -91,7 +92,7 @@ java -cp bin huffman.Tests
 
 ## Full Test Suite Output
 
-Running `java -cp bin huffman.Tests` executes 21 automated validation tests across 5 categories:
+Running `java -cp bin huffman.Tests` executes 22 automated validation tests across 5 categories:
 
 ```
 =================================================
@@ -119,7 +120,8 @@ Forced Huffman: Single char repeated 1000 times            [PASS] - Verified Fla
 Forced Huffman: Normal text                                [PASS] - Verified Flag 1 (Huffman); content matches exactly (340 chars)
 Forced Huffman: Unicode characters and newlines            [PASS] - Verified Flag 1 (Huffman); content matches exactly (302 chars)
 
---- Part 4: Big-File Test (~40 KB, 3-Byte Varint) ---
+--- Part 4: Benchmark Tests (Natural Text & Synthetic Big-File) ---
+Natural-Text: natural_input.txt (~42 KB real prose)        [PASS] - Byte-for-byte match! Orig: 42,967 B, Comp: 24,363 B (Hdr: 256 B, Payload: 24,107 B), Ratio: 0.5670, Saved: 43.30%
 Big-File: big_input.txt (~40 KB, 3-byte varint)            [PASS] - Byte-for-byte match! Orig: 40,161 B, Comp: 18,657 B (Hdr: 221 B, Payload: 18,436 B), Ratio: 0.4646, Saved: 53.54% [3-byte varint for ' ': 16,797]
 
 --- Part 5: Edge-Case Safety & Corruption Guards ---
@@ -134,27 +136,27 @@ Safety: Truncated header returns null                      [PASS] - Handled safe
 Safety: CompressionStats division-by-zero guard            [PASS] - No NaN or Infinity present
 
 -------------------------------------------------
-Test Summary: 21 / 21 passed.
+Test Summary: 22 / 22 passed.
 ALL TESTS PASSED SUCCESSFULLY! [PASS]
 -------------------------------------------------
 ```
 
 ---
 
-## Compression Results Comparison
+## Benchmark Results Comparison
 
-| Metric | Small File (`input.txt`) | Large File (`big_input.txt`) |
-| :--- | :--- | :--- |
-| **Original File Size** | 319 bytes | 40,161 bytes |
-| **Selected Mode** | Flag 1 (Huffman Mode) | Flag 1 (Huffman Mode) |
-| **Header Size** | 106 bytes | 221 bytes (includes 3-byte varint for `' '`) |
-| **Payload Size** | 170 bytes | 18,436 bytes |
-| **Total Compressed Size** | **276 bytes** | **18,657 bytes** |
-| **Compression Ratio** | **0.8652 (86.52%)** | **0.4646 (46.46%)** |
-| **Space Saved** | **13.48%** | **53.54%** |
+| Metric | Short Sample (`input.txt`) | Natural Prose (`natural_input.txt`) | Synthetic Test (`big_input.txt`) |
+| :--- | :--- | :--- | :--- |
+| **Description** | 4-sentence overview | Authentic English prose (*Sherlock Holmes*) | Synthetic text to exercise 3-byte varints |
+| **Original File Size** | 319 bytes | **42,967 bytes** (~42 KB) | 40,161 bytes (~40 KB) |
+| **Selected Mode** | Flag 1 (Huffman) | **Flag 1 (Huffman)** | Flag 1 (Huffman) |
+| **Header Size** | 106 bytes | **256 bytes** | 221 bytes (exercises 3-byte varint for `' '`) |
+| **Payload Size** | 170 bytes | **24,107 bytes** | 18,436 bytes |
+| **Compressed Size** | **276 bytes** | **24,363 bytes** | **18,657 bytes** |
+| **Compression Ratio** | **0.8652 (86.52%)** | **0.5670 (56.70%)** | **0.4646 (46.46%)** |
+| **Space Saved** | **13.48%** | **43.30%** | **53.54%** |
 
-### Why Small Files Save Little (or None)
-Every Huffman-compressed file must store the dictionary (unique characters and their frequencies) in its header so that the decompressor can reconstruct the binary tree. 
-- For `input.txt` (319 bytes), the 106-byte header accounts for **33.2%** of the entire original file size. Although the bitstream payload reduces from 319 bytes to 170 bytes (46.75% bit reduction), adding the 106-byte header leaves a net file saving of only 13.48%.
-- For very small files (e.g. 5 bytes), the header would be larger than the original text, triggering **Stored Mode (Flag 0)**.
-- For `big_input.txt` (40,161 bytes), the 221-byte header represents only **0.55%** of the original size, allowing the ~54% payload compression to translate almost entirely into a **53.54% net file reduction**.
+### Benchmark Analysis: Natural English vs. Small & Synthetic Files
+- **Natural English (`natural_input.txt`)**: Represents realistic performance on natural English literature. Character distributions follow standard English letter frequencies, resulting in a typical Huffman space savings of **43.30%** (compression ratio of `0.5670`).
+- **Short Sample (`input.txt`)**: For short files (319 bytes), the 106-byte dictionary header accounts for **33.2%** of the original size. Although the payload itself shrinks by 46.75%, the fixed metadata overhead leaves a net file saving of **13.48%**. For files smaller than ~25 bytes, this overhead exceeds bit savings entirely, triggering **Stored Mode (Flag 0)**.
+- **Synthetic Test (`big_input.txt`)**: Specifically designed to stress-test 3-byte varint deserialization by deliberately inflating space occurrence to 16,797 ($\ge 16,384$). Because the space character dominates over 40% of the text, it is assigned a very short Huffman code (1–2 bits), yielding an artificially high compression ratio (53.54%) compared to natural English.
