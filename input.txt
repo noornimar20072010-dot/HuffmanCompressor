@@ -1,0 +1,4 @@
+Huffman coding is a lossless data compression algorithm.
+It assigns variable-length codes to input characters based on their frequencies.
+The most frequent character gets the shortest code, while the least frequent character gets the longest code.
+This makes it efficient for compressing text and general data streams.

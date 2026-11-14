@@ -1,0 +1,6 @@
+bin/
+*.huff
+*_restored.txt
+test_temp/
+*.class
+scratch/
