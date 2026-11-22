@@ -113,8 +113,8 @@ public final class FrequencyChartPanel extends JPanel {
         int currentY = TOP_PADDING;
         FontMetrics fm = g2.getFontMetrics(getFont());
 
-        Color barColor = new Color(51, 122, 183);
-        Color barBorderColor = new Color(40, 96, 144);
+        Color barColor = new Color(59, 130, 246);
+        Color barBorderColor = new Color(37, 99, 235);
 
         for (Map.Entry<Character, Integer> entry : topEntries) {
             char c = entry.getKey();

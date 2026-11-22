@@ -6,6 +6,9 @@ import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -14,19 +17,26 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JToolBar;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -69,8 +79,8 @@ public final class MainFrame extends JFrame {
     public MainFrame() {
         super("Huffman Coding Text Compressor");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1100, 720);
-        setMinimumSize(new Dimension(850, 520));
+        setSize(1200, 750);
+        setMinimumSize(new Dimension(900, 550));
         setLocationRelativeTo(null);
 
         initUI();
@@ -79,18 +89,94 @@ public final class MainFrame extends JFrame {
     private void initUI() {
         setLayout(new BorderLayout());
 
-        // 1. Top Toolbar
+        // 1. Menu Bar
+        setJMenuBar(createMenuBar());
+
+        // 2. Top Toolbar
         add(createToolbar(), BorderLayout.NORTH);
 
-        // 2. Center Split Pane (Editor on Left, Visualizations on Right)
+        // 3. Center Split Pane (Editor on Left, Visualizations on Right)
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-        splitPane.setResizeWeight(0.45);
+        splitPane.setContinuousLayout(true);
+        splitPane.setOneTouchExpandable(true);
+        splitPane.setDividerSize(8);
+        splitPane.setResizeWeight(0.42);
         splitPane.setLeftComponent(createEditorPanel());
         splitPane.setRightComponent(createTabbedPane());
         add(splitPane, BorderLayout.CENTER);
 
-        // 3. Bottom Status Bar
+        // 4. Bottom Status Bar
         add(createStatusBar(), BorderLayout.SOUTH);
+    }
+
+    private JMenuBar createMenuBar() {
+        JMenuBar menuBar = new JMenuBar();
+
+        // File Menu
+        JMenu fileMenu = new JMenu("File");
+        fileMenu.setMnemonic('F');
+
+        JMenuItem openTextItem = new JMenuItem("Open Text File...");
+        openTextItem.setMnemonic('O');
+        openTextItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
+        openTextItem.addActionListener(e -> handleOpenTextFile());
+        fileMenu.add(openTextItem);
+
+        JMenuItem saveHuffItem = new JMenuItem("Save Compressed (.huff)...");
+        saveHuffItem.setMnemonic('S');
+        saveHuffItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
+        saveHuffItem.addActionListener(e -> handleSaveHuffFile());
+        fileMenu.add(saveHuffItem);
+
+        fileMenu.addSeparator();
+
+        JMenuItem openHuffItem = new JMenuItem("Open Compressed (.huff)...");
+        openHuffItem.addActionListener(e -> handleOpenHuffFile());
+        fileMenu.add(openHuffItem);
+
+        JMenuItem saveTextItem = new JMenuItem("Save Restored Text As...");
+        saveTextItem.addActionListener(e -> handleSaveTextFile());
+        fileMenu.add(saveTextItem);
+
+        fileMenu.addSeparator();
+
+        JMenuItem exitItem = new JMenuItem("Exit");
+        exitItem.setMnemonic('X');
+        exitItem.addActionListener(e -> System.exit(0));
+        fileMenu.add(exitItem);
+
+        // Actions Menu
+        JMenu actionMenu = new JMenu("Actions");
+        actionMenu.setMnemonic('A');
+
+        JMenuItem compressItem = new JMenuItem("Compress Editor Text");
+        compressItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.CTRL_DOWN_MASK));
+        compressItem.addActionListener(e -> handleCompress());
+        actionMenu.add(compressItem);
+
+        JMenuItem decompressItem = new JMenuItem("Decompress In-Memory Data");
+        decompressItem.addActionListener(e -> handleDecompress());
+        actionMenu.add(decompressItem);
+
+        actionMenu.addSeparator();
+
+        JMenuItem clearItem = new JMenuItem("Clear All");
+        clearItem.addActionListener(e -> handleClear());
+        actionMenu.add(clearItem);
+
+        // Help Menu
+        JMenu helpMenu = new JMenu("Help");
+        helpMenu.setMnemonic('H');
+
+        JMenuItem aboutItem = new JMenuItem("About Huffman Compressor");
+        aboutItem.addActionListener(e -> showAboutDialog());
+        helpMenu.add(aboutItem);
+
+        menuBar.add(fileMenu);
+        menuBar.add(actionMenu);
+        menuBar.add(helpMenu);
+
+        return menuBar;
     }
 
     private JToolBar createToolbar() {
@@ -99,50 +185,110 @@ public final class MainFrame extends JFrame {
         toolbar.setBackground(new Color(248, 249, 250));
         toolbar.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(222, 226, 230)),
-                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+                BorderFactory.createEmptyBorder(6, 10, 6, 10)
         ));
 
-        JButton btnOpenText = new JButton("Open Text File (.txt)");
-        btnOpenText.setToolTipText("Load a plain text file into the editor");
+        JButton btnOpenText = createToolbarButton("Open Text File (.txt)", "Load a plain text file from disk into the editor", false, false);
         btnOpenText.addActionListener(e -> handleOpenTextFile());
 
-        JButton btnCompress = new JButton("Compress");
-        btnCompress.setFont(btnCompress.getFont().deriveFont(Font.BOLD));
-        btnCompress.setForeground(new Color(13, 110, 253));
-        btnCompress.setToolTipText("Compress editor text and update visualization");
+        JButton btnCompress = createToolbarButton("Compress", "Compress editor text using adaptive Huffman coding", true, false);
         btnCompress.addActionListener(e -> handleCompress());
 
-        JButton btnSaveHuff = new JButton("Save Compressed (.huff)");
-        btnSaveHuff.setToolTipText("Export compressed binary data to disk");
+        JButton btnSaveHuff = createToolbarButton("Save Compressed (.huff)", "Save compressed binary .huff file to disk", false, false);
         btnSaveHuff.addActionListener(e -> handleSaveHuffFile());
 
-        JButton btnOpenHuff = new JButton("Open Compressed (.huff)");
-        btnOpenHuff.setToolTipText("Load and decompress a .huff file from disk");
+        JButton btnOpenHuff = createToolbarButton("Open Compressed (.huff)", "Open and decompress a binary .huff file from disk", false, false);
         btnOpenHuff.addActionListener(e -> handleOpenHuffFile());
 
-        JButton btnDecompress = new JButton("Decompress");
-        btnDecompress.setToolTipText("Restore text from the latest in-memory compressed data");
+        JButton btnDecompress = createToolbarButton("Decompress", "Decompress current in-memory binary payload back to text", false, true);
         btnDecompress.addActionListener(e -> handleDecompress());
 
-        JButton btnSaveRestored = new JButton("Save Text");
-        btnSaveRestored.setToolTipText("Save current editor text to disk as .txt");
+        JButton btnSaveRestored = createToolbarButton("Save Text", "Save current editor text to disk as a .txt file", false, false);
         btnSaveRestored.addActionListener(e -> handleSaveTextFile());
 
-        JButton btnClear = new JButton("Clear");
-        btnClear.setToolTipText("Reset text editor and all visualization tabs");
+        JButton btnClear = createToolbarButton("Clear", "Reset editor contents, table, tree, chart, and statistics", false, false);
         btnClear.addActionListener(e -> handleClear());
 
+        JButton btnAbout = createToolbarButton("About", "View information about this Huffman Compressor project", false, false);
+        btnAbout.addActionListener(e -> showAboutDialog());
+
         toolbar.add(btnOpenText);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnCompress);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnSaveHuff);
-        toolbar.addSeparator(new Dimension(10, 20));
+        toolbar.add(Box.createHorizontalStrut(10));
+        toolbar.addSeparator(new Dimension(2, 24));
+        toolbar.add(Box.createHorizontalStrut(10));
         toolbar.add(btnOpenHuff);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnDecompress);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(btnSaveRestored);
-        toolbar.addSeparator(new Dimension(10, 20));
+        toolbar.add(Box.createHorizontalStrut(10));
+        toolbar.addSeparator(new Dimension(2, 24));
+        toolbar.add(Box.createHorizontalStrut(10));
         toolbar.add(btnClear);
+        toolbar.add(Box.createHorizontalGlue());
+        toolbar.add(btnAbout);
 
         return toolbar;
+    }
+
+    private JButton createToolbarButton(String text, String tooltip, boolean isPrimary, boolean isSecondary) {
+        JButton btn = new JButton(text);
+        btn.setToolTipText(tooltip);
+        btn.setFocusPainted(false);
+        btn.setFont(new Font("SansSerif", (isPrimary || isSecondary) ? Font.BOLD : Font.PLAIN, 12));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        Color bgNormal;
+        Color bgHover;
+        Color fgNormal;
+        Color borderColor;
+
+        if (isPrimary) {
+            // Compress: Prominent Blue
+            bgNormal = new Color(13, 110, 253);
+            bgHover = new Color(11, 94, 215);
+            fgNormal = Color.WHITE;
+            borderColor = new Color(10, 88, 202);
+        } else if (isSecondary) {
+            // Decompress: Prominent Green / Teal
+            bgNormal = new Color(25, 135, 84);
+            bgHover = new Color(21, 115, 71);
+            fgNormal = Color.WHITE;
+            borderColor = new Color(20, 108, 67);
+        } else {
+            // Standard action button
+            bgNormal = new Color(248, 249, 250);
+            bgHover = new Color(233, 236, 239);
+            fgNormal = new Color(33, 37, 41);
+            borderColor = new Color(206, 212, 218);
+        }
+
+        btn.setBackground(bgNormal);
+        btn.setForeground(fgNormal);
+        btn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(borderColor, 1, true),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        ));
+
+        btn.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (btn.isEnabled()) {
+                    btn.setBackground(bgHover);
+                }
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                btn.setBackground(bgNormal);
+            }
+        });
+
+        return btn;
     }
 
     private JPanel createEditorPanel() {
@@ -215,16 +361,50 @@ public final class MainFrame extends JFrame {
 
         codeTable = new JTable(codeTableModel);
         codeTable.setAutoCreateRowSorter(true);
-        codeTable.setRowHeight(22);
+        codeTable.setRowHeight(26);
+        codeTable.setShowGrid(true);
+        codeTable.setGridColor(new Color(230, 233, 236));
+        codeTable.setSelectionBackground(new Color(224, 231, 255));
+        codeTable.setSelectionForeground(new Color(30, 41, 59));
         codeTable.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        codeTable.getTableHeader().setFont(new Font("SansSerif", Font.BOLD, 12));
 
-        // Centered alignment for numbers and codes
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
-        codeTable.getColumnModel().getColumn(1).setCellRenderer(centerRenderer);
-        codeTable.getColumnModel().getColumn(2).setCellRenderer(centerRenderer);
-        codeTable.getColumnModel().getColumn(3).setCellRenderer(centerRenderer);
+        // Header Style
+        JTableHeader header = codeTable.getTableHeader();
+        header.setPreferredSize(new Dimension(header.getWidth(), 30));
+        header.setBackground(new Color(241, 245, 249));
+        header.setForeground(new Color(30, 41, 59));
+        header.setFont(new Font("SansSerif", Font.BOLD, 12));
+        header.setReorderingAllowed(false);
+
+        // Custom Zebra Renderer with padding and alignments
+        class ZebraRenderer extends DefaultTableCellRenderer {
+            ZebraRenderer(int alignment) {
+                setHorizontalAlignment(alignment);
+            }
+
+            @Override
+            public Component getTableCellRendererComponent(
+                    JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column
+            ) {
+                Component comp = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+
+                if (!isSelected) {
+                    if (row % 2 == 0) {
+                        comp.setBackground(Color.WHITE);
+                    } else {
+                        comp.setBackground(new Color(248, 250, 252));
+                    }
+                    comp.setForeground(new Color(30, 41, 59));
+                }
+                return comp;
+            }
+        }
+
+        codeTable.getColumnModel().getColumn(0).setCellRenderer(new ZebraRenderer(SwingConstants.LEFT));
+        codeTable.getColumnModel().getColumn(1).setCellRenderer(new ZebraRenderer(SwingConstants.CENTER));
+        codeTable.getColumnModel().getColumn(2).setCellRenderer(new ZebraRenderer(SwingConstants.CENTER));
+        codeTable.getColumnModel().getColumn(3).setCellRenderer(new ZebraRenderer(SwingConstants.CENTER));
 
         JScrollPane scrollPane = new JScrollPane(codeTable);
         panel.add(scrollPane, BorderLayout.CENTER);
@@ -265,7 +445,7 @@ public final class MainFrame extends JFrame {
         // Special Note for Stored Mode
         lblModeNote = new JLabel("");
         lblModeNote.setFont(new Font("SansSerif", Font.ITALIC, 12));
-        lblModeNote.setForeground(new Color(180, 100, 20));
+        lblModeNote.setForeground(new Color(217, 119, 6)); // Warm amber
         gbc.gridx = 1;
         gbc.gridy = row++;
         panel.add(lblModeNote, gbc);
@@ -314,6 +494,13 @@ public final class MainFrame extends JFrame {
         statusPanel.add(statusLabel, BorderLayout.WEST);
 
         return statusPanel;
+    }
+
+    private String formatBytes(long count) {
+        if (count == 1 || count == -1) {
+            return String.format("%,d byte", count);
+        }
+        return String.format("%,d bytes", count);
     }
 
     // =========================================================================
@@ -381,8 +568,8 @@ public final class MainFrame extends JFrame {
 
                     String modeStr = (result.getMode() == FileHandler.MODE_STORED) ? "Stored Mode" : "Huffman Mode";
                     statusLabel.setText("Compression complete (" + modeStr + ") - "
-                            + String.format("%,d", result.getOriginalSize()) + " B -> "
-                            + String.format("%,d", result.getCompressedSize()) + " B ("
+                            + formatBytes(result.getOriginalSize()) + " -> "
+                            + formatBytes(result.getCompressedSize()) + " ("
                             + String.format("%.2f%%", result.getSpaceSavedPercentage()) + " saved)");
                 } catch (Exception ex) {
                     showError("Compression error: " + getRootMessage(ex));
@@ -426,7 +613,7 @@ public final class MainFrame extends JFrame {
                     setBusy(false, "Ready");
                     try {
                         get();
-                        statusLabel.setText("Saved compressed file to '" + outFile.getName() + "' (" + String.format("%,d", lastCompressedBytes.length) + " bytes)");
+                        statusLabel.setText("Saved compressed file to '" + outFile.getName() + "' (" + formatBytes(lastCompressedBytes.length) + ")");
                     } catch (Exception ex) {
                         showError("Failed to save .huff file: " + getRootMessage(ex));
                     }
@@ -568,6 +755,21 @@ public final class MainFrame extends JFrame {
         statusLabel.setText("Cleared all editor contents and visualization panels.");
     }
 
+    private void showAboutDialog() {
+        String message = """
+                Huffman Coding Text Compressor
+                College Semester 3 Java Project (Java 17)
+                
+                • Dual Interfaces: Java Swing GUI & CLI Menu
+                • Zero External Libraries / Zero Build Tools (Plain javac)
+                • Adaptive Dual-Mode Encoding (Stored Mode & Huffman Mode)
+                • Unsigned 7-Bit Varint Frequency Table Compression
+                • Dynamic Zoomable Tree Visualizer & Frequency Chart
+                • Full Automated 29-Test Validation Suite
+                """;
+        JOptionPane.showMessageDialog(this, message, "About Huffman Compressor", JOptionPane.INFORMATION_MESSAGE);
+    }
+
     private void updateVisualizations(HuffmanResult result) {
         // 1. Update Code Table
         codeTableModel.setRowCount(0);
@@ -593,26 +795,29 @@ public final class MainFrame extends JFrame {
         chartPanel.setFrequencies(freqs);
 
         // 4. Update Statistics Tab
-        lblOriginalSize.setText(String.format("%,d bytes", result.getOriginalSize()));
-        lblCompressedSize.setText(String.format("%,d bytes", result.getCompressedSize()));
-        lblHeaderSize.setText(String.format("%,d bytes", result.getHeaderSize()));
-        lblPayloadSize.setText(String.format("%,d bytes", result.getPayloadSize()));
+        lblOriginalSize.setText(formatBytes(result.getOriginalSize()));
+        lblCompressedSize.setText(formatBytes(result.getCompressedSize()));
+        lblHeaderSize.setText(formatBytes(result.getHeaderSize()));
+        lblPayloadSize.setText(formatBytes(result.getPayloadSize()));
         lblRatio.setText(String.format("%.4f (%.2f%% of original)", result.getCompressionRatio(), result.getCompressionRatio() * 100.0));
-
-        if (result.getSpaceSavedPercentage() >= 0) {
-            lblSpaceSaved.setText(String.format("%.2f%%", result.getSpaceSavedPercentage()));
-            lblSpaceSaved.setForeground(new Color(25, 135, 84)); // Green
-        } else {
-            lblSpaceSaved.setText(String.format("%.2f%% (File expanded due to metadata)", result.getSpaceSavedPercentage()));
-            lblSpaceSaved.setForeground(new Color(220, 53, 69)); // Red
-        }
 
         if (result.getMode() == FileHandler.MODE_STORED) {
             lblMode.setText("Flag 0 (Stored Mode - raw UTF-8)");
-            lblModeNote.setText("Stored mode used: Huffman would not save space for this input.");
+            lblMode.setForeground(new Color(217, 119, 6)); // Warm amber
+            lblModeNote.setText("Stored mode: raw text plus a 1-byte mode flag. Huffman would not save space for this input.");
+            lblSpaceSaved.setText("0.00% (Stored mode: raw text plus a 1-byte mode flag. Huffman would not save space for this input.)");
+            lblSpaceSaved.setForeground(new Color(217, 119, 6)); // Warm amber
         } else {
             lblMode.setText("Flag 1 (Huffman Mode - tree encoded)");
+            lblMode.setForeground(new Color(13, 110, 253)); // Blue
             lblModeNote.setText("");
+            if (result.getSpaceSavedPercentage() >= 0) {
+                lblSpaceSaved.setText(String.format("%.2f%%", result.getSpaceSavedPercentage()));
+                lblSpaceSaved.setForeground(new Color(25, 135, 84)); // Green
+            } else {
+                lblSpaceSaved.setText(String.format("%.2f%% (File expanded due to metadata)", result.getSpaceSavedPercentage()));
+                lblSpaceSaved.setForeground(new Color(220, 53, 69)); // Red
+            }
         }
 
         if (result.isRoundTripVerified()) {

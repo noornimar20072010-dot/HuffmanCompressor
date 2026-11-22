@@ -1,5 +1,6 @@
 package huffman;
 
+import javax.swing.Box;
 import javax.swing.JButton;
 import javax.swing.JPanel;
 import javax.swing.JToolBar;
@@ -28,10 +29,10 @@ public final class TreePanel extends JPanel {
 
     private static final int NODE_DIAMETER = 44;
     private static final int NODE_RADIUS = NODE_DIAMETER / 2;
-    private static final int VERTICAL_GAP = 60;
-    private static final int HORIZONTAL_SPACING = 52;
-    private static final int TOP_MARGIN = 50;
-    private static final int SIDE_MARGIN = 40;
+    private static final int VERTICAL_GAP = 72;
+    private static final int HORIZONTAL_SPACING = 62;
+    private static final int TOP_MARGIN = 55;
+    private static final int SIDE_MARGIN = 45;
 
     private HuffmanNode root;
     private double zoomFactor = 1.0;
@@ -55,21 +56,27 @@ public final class TreePanel extends JPanel {
         JToolBar toolbar = new JToolBar();
         toolbar.setFloatable(false);
         toolbar.setBackground(new Color(245, 247, 250));
+        toolbar.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
         JButton zoomInBtn = new JButton("Zoom In (+)");
         zoomInBtn.setToolTipText("Increase tree view scale");
+        zoomInBtn.setFocusPainted(false);
         zoomInBtn.addActionListener(e -> setZoom(zoomFactor + 0.15));
 
         JButton zoomOutBtn = new JButton("Zoom Out (-)");
         zoomOutBtn.setToolTipText("Decrease tree view scale");
+        zoomOutBtn.setFocusPainted(false);
         zoomOutBtn.addActionListener(e -> setZoom(zoomFactor - 0.15));
 
         JButton resetZoomBtn = new JButton("Reset Zoom (100%)");
         resetZoomBtn.setToolTipText("Reset scale to default 100%");
+        resetZoomBtn.setFocusPainted(false);
         resetZoomBtn.addActionListener(e -> setZoom(1.0));
 
         toolbar.add(zoomInBtn);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(zoomOutBtn);
+        toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(resetZoomBtn);
 
         return toolbar;
@@ -275,16 +282,7 @@ public final class TreePanel extends JPanel {
             if (node.left != null) {
                 Point leftPoint = nodeCoordinates.get(node.left);
                 if (leftPoint != null) {
-                    g2.setColor(new Color(160, 175, 190));
-                    g2.drawLine(parentPoint.x, parentPoint.y, leftPoint.x, leftPoint.y);
-
-                    // Branch label '0'
-                    int labelX = (parentPoint.x * 2 + leftPoint.x) / 3 - 8;
-                    int labelY = (parentPoint.y * 2 + leftPoint.y) / 3;
-                    g2.setColor(new Color(217, 83, 79)); // Red label '0'
-                    g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-                    g2.drawString("0", labelX, labelY);
-
+                    drawBranchLineAndLabel(g2, parentPoint, leftPoint, "0", true);
                     drawBranches(g2, node.left);
                 }
             }
@@ -293,19 +291,45 @@ public final class TreePanel extends JPanel {
             if (node.right != null) {
                 Point rightPoint = nodeCoordinates.get(node.right);
                 if (rightPoint != null) {
-                    g2.setColor(new Color(160, 175, 190));
-                    g2.drawLine(parentPoint.x, parentPoint.y, rightPoint.x, rightPoint.y);
-
-                    // Branch label '1'
-                    int labelX = (parentPoint.x * 2 + rightPoint.x) / 3 + 4;
-                    int labelY = (parentPoint.y * 2 + rightPoint.y) / 3;
-                    g2.setColor(new Color(2, 117, 216)); // Blue label '1'
-                    g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-                    g2.drawString("1", labelX, labelY);
-
+                    drawBranchLineAndLabel(g2, parentPoint, rightPoint, "1", false);
                     drawBranches(g2, node.right);
                 }
             }
+        }
+
+        private void drawBranchLineAndLabel(Graphics2D g2, Point parent, Point child, String label, boolean isLeft) {
+            double dx = child.x - parent.x;
+            double dy = child.y - parent.y;
+            double dist = Math.hypot(dx, dy);
+
+            if (dist <= 0) return;
+
+            // Calculate perimeter start and end points outside parent and child circles
+            int startX = (int) Math.round(parent.x + dx * (NODE_RADIUS / dist));
+            int startY = (int) Math.round(parent.y + dy * (NODE_RADIUS / dist));
+            int endX = (int) Math.round(child.x - dx * (NODE_RADIUS / dist));
+            int endY = (int) Math.round(child.y - dy * (NODE_RADIUS / dist));
+
+            // Draw connecting branch line
+            g2.setColor(new Color(156, 163, 175));
+            g2.drawLine(startX, startY, endX, endY);
+
+            // Calculate midpoint of visible segment
+            int midX = (startX + endX) / 2;
+            int midY = (startY + endY) / 2;
+
+            // Offset label perpendicularly away from the line so it never touches the line or circles
+            int badgeX = isLeft ? (midX - 11) : (midX + 4);
+            int badgeY = midY + 4;
+
+            // Badge background for clean contrast
+            g2.setColor(new Color(255, 255, 255, 230));
+            g2.fillRoundRect(badgeX - 3, badgeY - 11, 14, 14, 4, 4);
+
+            // Branch label ('0' red, '1' blue)
+            g2.setColor(isLeft ? new Color(220, 38, 38) : new Color(37, 99, 235));
+            g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+            g2.drawString(label, badgeX, badgeY);
         }
 
         private void drawNodes(Graphics2D g2, HuffmanNode node) {
