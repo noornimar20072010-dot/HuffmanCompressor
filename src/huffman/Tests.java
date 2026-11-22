@@ -155,6 +155,7 @@ public class Tests {
             testServiceRoundTripSingleChar();
             testServiceRoundTripUnicodeEmoji();
             testServiceResultMatchesStats();
+            testServiceNaturalInputBenchmark();
             testServiceCorruptByteArrayThrows();
 
         } catch (Exception e) {
@@ -493,18 +494,23 @@ public class Tests {
 
     private static void testServiceRoundTripNormal() {
         totalTests++;
-        String testName = "Service: Round-trip normal text";
+        String testName = "Service: Round-trip normal text (Huffman Mode)";
         try {
             HuffmanService service = HuffmanService.INSTANCE;
-            String text = "The quick brown fox jumps over the lazy dog! 12345.";
+            String sentence = "Huffman coding is a lossless data compression algorithm using optimal prefix codes. ";
+            String text = sentence.repeat(6); // ~510 characters
             HuffmanResult result = service.compress(text);
             String decompressed = service.decompress(result.getCompressedBytes());
 
-            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+            boolean verified = result.isRoundTripVerified() && text.equals(decompressed);
+            boolean isHuffman = (result.getMode() == FileHandler.MODE_HUFFMAN);
+            boolean savedPositive = (result.getSpaceSavedPercentage() > 0.0);
+
+            if (verified && isHuffman && savedPositive) {
                 passedTests++;
-                printResult(testName, true, String.format("Verified in-memory round-trip (%d chars -> %d bytes)", text.length(), result.getCompressedSize()));
+                printResult(testName, true, String.format("Verified Flag 1! %d chars -> %d bytes (Saved: %.2f%%)", text.length(), result.getCompressedSize(), result.getSpaceSavedPercentage()));
             } else {
-                printResult(testName, false, "Decompressed text does not match original");
+                printResult(testName, false, String.format("Failed: verified=%b, mode=%d, saved=%.2f%%", verified, result.getMode(), result.getSpaceSavedPercentage()));
             }
         } catch (Exception e) {
             printResult(testName, false, "Exception: " + e.getMessage());
@@ -513,7 +519,7 @@ public class Tests {
 
     private static void testServiceRoundTripEmpty() {
         totalTests++;
-        String testName = "Service: Round-trip empty text";
+        String testName = "Service: Round-trip empty text (Stored Mode)";
         try {
             HuffmanService service = HuffmanService.INSTANCE;
             String text = "";
@@ -533,16 +539,16 @@ public class Tests {
 
     private static void testServiceRoundTripSingleChar() {
         totalTests++;
-        String testName = "Service: Round-trip one-character text";
+        String testName = "Service: Round-trip one-character text (Stored Mode)";
         try {
             HuffmanService service = HuffmanService.INSTANCE;
             String text = "A";
             HuffmanResult result = service.compress(text);
             String decompressed = service.decompress(result.getCompressedBytes());
 
-            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+            if (result.isRoundTripVerified() && text.equals(decompressed) && result.getMode() == FileHandler.MODE_STORED) {
                 passedTests++;
-                printResult(testName, true, "Verified single char round-trip ('A' restored exactly)");
+                printResult(testName, true, "Verified single char round-trip ('A' restored exactly, Flag 0)");
             } else {
                 printResult(testName, false, "Decompressed single character mismatch");
             }
@@ -553,18 +559,23 @@ public class Tests {
 
     private static void testServiceRoundTripUnicodeEmoji() {
         totalTests++;
-        String testName = "Service: Round-trip Unicode and emoji text";
+        String testName = "Service: Round-trip Unicode & emoji (Huffman Mode)";
         try {
             HuffmanService service = HuffmanService.INSTANCE;
-            String text = "Hello 世界! こんにちは 🌍 🚀 © ™ 🎉 [newline:\n\ttab]";
+            String snippet = "Hello 世界! こんにちは 🌍 🚀 © ™ 🎉 [newline:\n\ttab]\n";
+            String text = snippet.repeat(15); // ~675 chars
             HuffmanResult result = service.compress(text);
             String decompressed = service.decompress(result.getCompressedBytes());
 
-            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+            boolean verified = result.isRoundTripVerified() && text.equals(decompressed);
+            boolean isHuffman = (result.getMode() == FileHandler.MODE_HUFFMAN);
+            boolean savedPositive = (result.getSpaceSavedPercentage() > 0.0);
+
+            if (verified && isHuffman && savedPositive) {
                 passedTests++;
-                printResult(testName, true, String.format("Verified Unicode/emoji round-trip (%d chars restored)", text.length()));
+                printResult(testName, true, String.format("Verified Flag 1! %d chars (%d B -> %d B, Saved: %.2f%%)", text.length(), result.getOriginalSize(), result.getCompressedSize(), result.getSpaceSavedPercentage()));
             } else {
-                printResult(testName, false, "Decompressed Unicode text does not match");
+                printResult(testName, false, String.format("Failed: verified=%b, mode=%d, saved=%.2f%%", verified, result.getMode(), result.getSpaceSavedPercentage()));
             }
         } catch (Exception e) {
             printResult(testName, false, "Exception: " + e.getMessage());
@@ -576,7 +587,7 @@ public class Tests {
         String testName = "Service: HuffmanResult values match CompressionStats";
         try {
             HuffmanService service = HuffmanService.INSTANCE;
-            String text = "Huffman compression efficiency verification asserting stats parity across data structures.";
+            String text = "Statistical parity assertion verifying that HuffmanResult matches CompressionStats exactly. ".repeat(6); // ~570 chars
             HuffmanResult result = service.compress(text);
             CompressionStats stats = new CompressionStats(
                     result.getMode(),
@@ -585,6 +596,9 @@ public class Tests {
                     result.getHeaderSize(),
                     result.getPayloadSize()
             );
+
+            boolean isHuffman = (result.getMode() == FileHandler.MODE_HUFFMAN);
+            boolean savedPositive = (result.getSpaceSavedPercentage() > 0.0);
 
             boolean sizesMatch = (result.getOriginalSize() == stats.getOriginalBytes())
                     && (result.getCompressedSize() == stats.getCompressedBytes())
@@ -596,11 +610,37 @@ public class Tests {
 
             boolean sumMatches = (result.getHeaderSize() + result.getPayloadSize() == result.getCompressedSize());
 
-            if (sizesMatch && metricsMatch && sumMatches) {
+            if (isHuffman && savedPositive && sizesMatch && metricsMatch && sumMatches) {
                 passedTests++;
-                printResult(testName, true, String.format("Parity verified (Ratio: %.4f, Saved: %.2f%%)", result.getCompressionRatio(), result.getSpaceSavedPercentage()));
+                printResult(testName, true, String.format("Parity verified (Flag 1, Ratio: %.4f, Saved: %.2f%%)", result.getCompressionRatio(), result.getSpaceSavedPercentage()));
             } else {
                 printResult(testName, false, "Discrepancy detected between HuffmanResult and CompressionStats");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceNaturalInputBenchmark() {
+        totalTests++;
+        String testName = "Service: natural_input.txt benchmark (expect 24,363 B)";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String naturalText = service.readTextFile("natural_input.txt");
+            HuffmanResult result = service.compress(naturalText);
+            String decompressed = service.decompress(result.getCompressedBytes());
+
+            boolean verified = result.isRoundTripVerified() && naturalText.equals(decompressed);
+            boolean sizeMatches = (result.getCompressedSize() == 24363L);
+            boolean isHuffman = (result.getMode() == FileHandler.MODE_HUFFMAN);
+
+            if (verified && sizeMatches && isHuffman) {
+                passedTests++;
+                printResult(testName, true, String.format("Byte-for-byte match! Orig: %,d B, Comp: %,d B (expected 24,363 B), Saved: %.2f%%",
+                        result.getOriginalSize(), result.getCompressedSize(), result.getSpaceSavedPercentage()));
+            } else {
+                printResult(testName, false, String.format("Mismatch! Size: %,d B (expected 24,363 B), verified=%b, mode=%d",
+                        result.getCompressedSize(), verified, result.getMode()));
             }
         } catch (Exception e) {
             printResult(testName, false, "Exception: " + e.getMessage());
