@@ -146,6 +146,17 @@ public class Tests {
             testTruncatedHeaderHandling(tempDir);
             testCompressionStatsZeroGuard();
 
+            // ==============================================================
+            // PART 6: HUFFMAN SERVICE IN-MEMORY VALIDATION
+            // ==============================================================
+            System.out.println("\n--- Part 6: HuffmanService In-Memory Validation ---");
+            testServiceRoundTripNormal();
+            testServiceRoundTripEmpty();
+            testServiceRoundTripSingleChar();
+            testServiceRoundTripUnicodeEmoji();
+            testServiceResultMatchesStats();
+            testServiceCorruptByteArrayThrows();
+
         } catch (Exception e) {
             System.err.println("Fatal error during test suite execution: " + e.getMessage());
             e.printStackTrace();
@@ -477,6 +488,138 @@ public class Tests {
             printResult(testName, true, "No NaN or Infinity present");
         } else {
             printResult(testName, false, "Summary contains invalid numerical values: " + summary);
+        }
+    }
+
+    private static void testServiceRoundTripNormal() {
+        totalTests++;
+        String testName = "Service: Round-trip normal text";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String text = "The quick brown fox jumps over the lazy dog! 12345.";
+            HuffmanResult result = service.compress(text);
+            String decompressed = service.decompress(result.getCompressedBytes());
+
+            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+                passedTests++;
+                printResult(testName, true, String.format("Verified in-memory round-trip (%d chars -> %d bytes)", text.length(), result.getCompressedSize()));
+            } else {
+                printResult(testName, false, "Decompressed text does not match original");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceRoundTripEmpty() {
+        totalTests++;
+        String testName = "Service: Round-trip empty text";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String text = "";
+            HuffmanResult result = service.compress(text);
+            String decompressed = service.decompress(result.getCompressedBytes());
+
+            if (result.isRoundTripVerified() && text.equals(decompressed) && result.getMode() == FileHandler.MODE_STORED) {
+                passedTests++;
+                printResult(testName, true, "Verified empty text round-trip (Flag 0 Stored, 1 byte)");
+            } else {
+                printResult(testName, false, "Decompressed empty text mismatch or incorrect mode");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceRoundTripSingleChar() {
+        totalTests++;
+        String testName = "Service: Round-trip one-character text";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String text = "A";
+            HuffmanResult result = service.compress(text);
+            String decompressed = service.decompress(result.getCompressedBytes());
+
+            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+                passedTests++;
+                printResult(testName, true, "Verified single char round-trip ('A' restored exactly)");
+            } else {
+                printResult(testName, false, "Decompressed single character mismatch");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceRoundTripUnicodeEmoji() {
+        totalTests++;
+        String testName = "Service: Round-trip Unicode and emoji text";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String text = "Hello 世界! こんにちは 🌍 🚀 © ™ 🎉 [newline:\n\ttab]";
+            HuffmanResult result = service.compress(text);
+            String decompressed = service.decompress(result.getCompressedBytes());
+
+            if (result.isRoundTripVerified() && text.equals(decompressed)) {
+                passedTests++;
+                printResult(testName, true, String.format("Verified Unicode/emoji round-trip (%d chars restored)", text.length()));
+            } else {
+                printResult(testName, false, "Decompressed Unicode text does not match");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceResultMatchesStats() {
+        totalTests++;
+        String testName = "Service: HuffmanResult values match CompressionStats";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            String text = "Huffman compression efficiency verification asserting stats parity across data structures.";
+            HuffmanResult result = service.compress(text);
+            CompressionStats stats = new CompressionStats(
+                    result.getMode(),
+                    result.getOriginalSize(),
+                    result.getCompressedSize(),
+                    result.getHeaderSize(),
+                    result.getPayloadSize()
+            );
+
+            boolean sizesMatch = (result.getOriginalSize() == stats.getOriginalBytes())
+                    && (result.getCompressedSize() == stats.getCompressedBytes())
+                    && (result.getHeaderSize() == stats.getHeaderBytes())
+                    && (result.getPayloadSize() == stats.getPayloadBytes());
+
+            boolean metricsMatch = (Math.abs(result.getCompressionRatio() - stats.getCompressionRatio()) < 1e-9)
+                    && (Math.abs(result.getSpaceSavedPercentage() - stats.getSpaceSavedPercentage()) < 1e-9);
+
+            boolean sumMatches = (result.getHeaderSize() + result.getPayloadSize() == result.getCompressedSize());
+
+            if (sizesMatch && metricsMatch && sumMatches) {
+                passedTests++;
+                printResult(testName, true, String.format("Parity verified (Ratio: %.4f, Saved: %.2f%%)", result.getCompressionRatio(), result.getSpaceSavedPercentage()));
+            } else {
+                printResult(testName, false, "Discrepancy detected between HuffmanResult and CompressionStats");
+            }
+        } catch (Exception e) {
+            printResult(testName, false, "Exception: " + e.getMessage());
+        }
+    }
+
+    private static void testServiceCorruptByteArrayThrows() {
+        totalTests++;
+        String testName = "Service: Corrupt byte[] throws HuffmanException";
+        try {
+            HuffmanService service = HuffmanService.INSTANCE;
+            byte[] corruptBytes = new byte[]{ (byte) 99, 1, 2, 3, 4 }; // Invalid mode flag 99
+            service.decompress(corruptBytes);
+            printResult(testName, false, "Expected HuffmanException was not thrown");
+        } catch (HuffmanException e) {
+            passedTests++;
+            printResult(testName, true, "Caught expected HuffmanException: " + e.getMessage());
+        } catch (Exception e) {
+            printResult(testName, false, "Unexpected exception type: " + e.getClass().getName());
         }
     }
 
