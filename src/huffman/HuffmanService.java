@@ -193,6 +193,75 @@ public class HuffmanService {
         }
     }
 
+    /**
+     * Decompresses serialized .huff binary bytes and reconstructs the full {@link HuffmanResult}
+     * model (including rebuilt tree, frequency table, and code map for Huffman mode).
+     *
+     * @param huffBytes serialized .huff binary bytes
+     * @return {@link HuffmanResult} containing restored text, tree, frequencies, codes, and metrics
+     * @throws HuffmanException if decompression fails or data is corrupted
+     */
+    public HuffmanResult decompressWithResult(byte[] huffBytes) throws HuffmanException {
+        if (huffBytes == null || huffBytes.length == 0) {
+            throw new HuffmanException("Cannot decompress: input byte buffer is null or 0 bytes.");
+        }
+        try {
+            FileHandler.CompressedFileData fileData = FileHandler.readCompressedBytes(huffBytes);
+            String restoredText = Decompressor.decompressOrThrow(fileData);
+            byte mode = fileData.mode();
+            byte[] rawUtf8Bytes = restoredText.getBytes(StandardCharsets.UTF_8);
+            long originalSize = rawUtf8Bytes.length;
+            long compressedSize = huffBytes.length;
+
+            Map<Character, Integer> freqs;
+            HuffmanTree tree;
+            Map<Character, String> codeMap;
+            long headerSize;
+            long payloadSize;
+
+            if (mode == FileHandler.MODE_HUFFMAN) {
+                freqs = fileData.frequencies();
+                tree = new HuffmanTree(freqs);
+                codeMap = CodeGenerator.generateCodes(tree);
+                payloadSize = (fileData.compressedBytes() != null) ? fileData.compressedBytes().length : 0;
+                headerSize = compressedSize - payloadSize;
+            } else {
+                // Stored mode: analyze restored text to populate visualization tabs
+                freqs = FrequencyCounter.countFrequencies(restoredText);
+                tree = new HuffmanTree(freqs);
+                codeMap = CodeGenerator.generateCodes(tree);
+                payloadSize = (fileData.rawBytes() != null) ? fileData.rawBytes().length : 0;
+                headerSize = 1;
+            }
+
+            CompressionStats stats = new CompressionStats(
+                    mode,
+                    originalSize,
+                    compressedSize,
+                    headerSize,
+                    payloadSize
+            );
+
+            return new HuffmanResult(
+                    restoredText,
+                    freqs,
+                    codeMap,
+                    tree.getRoot(),
+                    huffBytes,
+                    mode,
+                    originalSize,
+                    compressedSize,
+                    headerSize,
+                    payloadSize,
+                    stats.getCompressionRatio(),
+                    stats.getSpaceSavedPercentage(),
+                    true
+            );
+        } catch (IOException e) {
+            throw new HuffmanException("I/O error during in-memory decompression: " + e.getMessage(), e);
+        }
+    }
+
     // =========================================================================
     // FILE HELPER METHODS (UTF-8 Plain Text & Binary .huff)
     // =========================================================================
