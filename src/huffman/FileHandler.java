@@ -2,6 +2,8 @@ package huffman;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -130,6 +132,28 @@ public class FileHandler {
     }
 
     /**
+     * Reads the entire contents of a text file from disk decoded as UTF-8, throwing an exception on failure.
+     *
+     * @param path path to the text file
+     * @return file contents as a String
+     * @throws IOException      if a disk I/O error occurs
+     * @throws HuffmanException if the file path is invalid, missing, or a directory
+     */
+    public static String readTextFileOrThrow(String path) throws IOException, HuffmanException {
+        if (path == null || path.isBlank()) {
+            throw new HuffmanException("File path is empty or blank.");
+        }
+        Path filePath = Path.of(path);
+        if (!Files.exists(filePath)) {
+            throw new HuffmanException("File does not exist at '" + path + "'.");
+        }
+        if (Files.isDirectory(filePath)) {
+            throw new HuffmanException("Path is a directory, not a file at '" + path + "'.");
+        }
+        return Files.readString(filePath, StandardCharsets.UTF_8);
+    }
+
+    /**
      * Reads the entire contents of a text file from disk decoded as UTF-8.
      * Safely validates that the file exists and is not a directory.
      *
@@ -137,25 +161,30 @@ public class FileHandler {
      * @return file contents as a String, or null if an error occurs
      */
     public static String readTextFile(String path) {
-        if (path == null || path.isBlank()) {
-            System.err.println("Error reading text file: File path is empty or blank.");
-            return null;
-        }
-        Path filePath = Path.of(path);
-        if (!Files.exists(filePath)) {
-            System.err.println("Error reading text file: File does not exist at '" + path + "'.");
-            return null;
-        }
-        if (Files.isDirectory(filePath)) {
-            System.err.println("Error reading text file: Path is a directory, not a file at '" + path + "'.");
-            return null;
-        }
         try {
-            return Files.readString(filePath, StandardCharsets.UTF_8);
+            return readTextFileOrThrow(path);
+        } catch (HuffmanException e) {
+            System.err.println("Error reading text file: " + e.getMessage());
+            return null;
         } catch (IOException e) {
             System.err.println("Error reading text file at '" + path + "': " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Writes string content to a text file on disk encoded as UTF-8, throwing an exception on failure.
+     *
+     * @param path    destination file path
+     * @param content text content to write
+     * @throws IOException      if a disk I/O error occurs
+     * @throws HuffmanException if the path is empty or invalid
+     */
+    public static void writeTextFileOrThrow(String path, String content) throws IOException, HuffmanException {
+        if (path == null || path.isBlank()) {
+            throw new HuffmanException("Destination path is empty.");
+        }
+        Files.writeString(Path.of(path), content != null ? content : "", StandardCharsets.UTF_8);
     }
 
     /**
@@ -166,13 +195,12 @@ public class FileHandler {
      * @return true if successful, false on error
      */
     public static boolean writeTextFile(String path, String content) {
-        if (path == null || path.isBlank()) {
-            System.err.println("Error writing text file: Destination path is empty.");
-            return false;
-        }
         try {
-            Files.writeString(Path.of(path), content, StandardCharsets.UTF_8);
+            writeTextFileOrThrow(path, content);
             return true;
+        } catch (HuffmanException e) {
+            System.err.println("Error writing text file: " + e.getMessage());
+            return false;
         } catch (IOException e) {
             System.err.println("Error writing text file at '" + path + "': " + e.getMessage());
             return false;
@@ -201,6 +229,146 @@ public class FileHandler {
     }
 
     /**
+     * Writes stored uncompressed data (mode 0) to an output stream.
+     *
+     * @param out      output stream
+     * @param rawBytes raw UTF-8 bytes
+     * @throws IOException if an I/O error occurs
+     */
+    public static void writeStoredData(OutputStream out, byte[] rawBytes) throws IOException {
+        DataOutputStream dataOut = (out instanceof DataOutputStream dos) ? dos : new DataOutputStream(out);
+        dataOut.writeByte(MODE_STORED);
+        if (rawBytes != null && rawBytes.length > 0) {
+            dataOut.write(rawBytes);
+        }
+        dataOut.flush();
+    }
+
+    /**
+     * Writes Huffman-compressed data (mode 1) with varint frequency table to an output stream.
+     *
+     * @param out             output stream
+     * @param frequencies     character frequency table
+     * @param paddingBits     padding bits count in the final byte (0-7)
+     * @param compressedBytes packed payload bytes
+     * @throws IOException if an I/O error occurs
+     */
+    public static void writeHuffmanData(OutputStream out, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) throws IOException {
+        DataOutputStream dataOut = (out instanceof DataOutputStream dos) ? dos : new DataOutputStream(out);
+        // 1. Write mode flag (Flag 1)
+        dataOut.writeByte(MODE_HUFFMAN);
+
+        // 2. Write unique character count
+        dataOut.writeInt(frequencies == null ? 0 : frequencies.size());
+
+        // 3. Write character and varint frequency pairs
+        if (frequencies != null) {
+            for (Map.Entry<Character, Integer> entry : frequencies.entrySet()) {
+                dataOut.writeChar(entry.getKey());
+                writeVarInt(dataOut, entry.getValue());
+            }
+        }
+
+        // 4. Write padding bits count
+        dataOut.writeInt(paddingBits);
+
+        // 5. Write payload length and packed bytes
+        dataOut.writeInt(compressedBytes == null ? 0 : compressedBytes.length);
+        if (compressedBytes != null && compressedBytes.length > 0) {
+            dataOut.write(compressedBytes);
+        }
+        dataOut.flush();
+    }
+
+    /**
+     * Determines whether auto compression should choose Stored mode (0) or Huffman mode (1).
+     *
+     * @param rawUtf8Bytes       original raw UTF-8 bytes
+     * @param frequencies        character frequency table
+     * @param payloadBytesLength length of packed payload in bytes
+     * @return MODE_HUFFMAN (1) if Huffman is smaller, otherwise MODE_STORED (0)
+     */
+    public static byte determineAutoMode(byte[] rawUtf8Bytes, Map<Character, Integer> frequencies, int payloadBytesLength) {
+        int originalSize = (rawUtf8Bytes == null) ? 0 : rawUtf8Bytes.length;
+        int prospectiveHuffmanSize = calculateHuffmanFileSize(frequencies, payloadBytesLength);
+        return (prospectiveHuffmanSize < originalSize) ? MODE_HUFFMAN : MODE_STORED;
+    }
+
+    /**
+     * Writes auto-compressed data to an output stream.
+     *
+     * @param out             destination stream
+     * @param rawUtf8Bytes    original raw UTF-8 bytes
+     * @param frequencies     character frequency table
+     * @param paddingBits     padding bits in the last payload byte
+     * @param compressedBytes packed payload bytes
+     * @return selected mode (0 = MODE_STORED, 1 = MODE_HUFFMAN)
+     * @throws IOException if an I/O error occurs
+     */
+    public static byte writeAutoCompressedData(OutputStream out, byte[] rawUtf8Bytes, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) throws IOException {
+        byte selectedMode = determineAutoMode(rawUtf8Bytes, frequencies, compressedBytes == null ? 0 : compressedBytes.length);
+        if (selectedMode == MODE_HUFFMAN) {
+            writeHuffmanData(out, frequencies, paddingBits, compressedBytes);
+        } else {
+            writeStoredData(out, rawUtf8Bytes);
+        }
+        return selectedMode;
+    }
+
+    /**
+     * Serializes compressed data into an in-memory byte array using the shared .huff binary format.
+     *
+     * @param mode            mode flag (MODE_STORED or MODE_HUFFMAN)
+     * @param rawBytes        original bytes (used if mode is MODE_STORED)
+     * @param frequencies     frequency map (used if mode is MODE_HUFFMAN)
+     * @param paddingBits     padding bits (used if mode is MODE_HUFFMAN)
+     * @param compressedBytes packed bitstream payload (used if mode is MODE_HUFFMAN)
+     * @return complete serialized .huff binary bytes
+     * @throws IOException if serialization fails
+     */
+    public static byte[] serializeCompressedData(byte mode, byte[] rawBytes, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        if (mode == MODE_STORED) {
+            writeStoredData(baos, rawBytes);
+        } else if (mode == MODE_HUFFMAN) {
+            writeHuffmanData(baos, frequencies, paddingBits, compressedBytes);
+        } else {
+            throw new IllegalArgumentException("Invalid mode flag: " + mode);
+        }
+        return baos.toByteArray();
+    }
+
+    /**
+     * Serializes auto-compressed data into an in-memory byte array.
+     *
+     * @param rawUtf8Bytes    raw UTF-8 input bytes
+     * @param frequencies     frequency map
+     * @param paddingBits     padding bits
+     * @param compressedBytes packed payload
+     * @return complete serialized .huff binary bytes
+     * @throws IOException if serialization fails
+     */
+    public static byte[] serializeAutoCompressedData(byte[] rawUtf8Bytes, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        writeAutoCompressedData(baos, rawUtf8Bytes, frequencies, paddingBits, compressedBytes);
+        return baos.toByteArray();
+    }
+
+    /**
+     * Writes an uncompressed file with mode flag 0 (MODE_STORED) followed by raw UTF-8 bytes, throwing on error.
+     *
+     * @param path     destination file path
+     * @param rawBytes raw UTF-8 bytes to store
+     * @throws IOException if writing fails
+     */
+    public static void writeStoredFileOrThrow(String path, byte[] rawBytes) throws IOException {
+        try (FileOutputStream fos = new FileOutputStream(path);
+             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
+            writeStoredData(bos, rawBytes);
+        }
+    }
+
+    /**
      * Writes an uncompressed file with mode flag 0 (MODE_STORED) followed by raw UTF-8 bytes.
      *
      * @param path     destination file path
@@ -208,15 +376,28 @@ public class FileHandler {
      * @return true if written successfully, false otherwise
      */
     public static boolean writeStoredFile(String path, byte[] rawBytes) {
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(path)))) {
-            out.writeByte(MODE_STORED);
-            if (rawBytes != null && rawBytes.length > 0) {
-                out.write(rawBytes);
-            }
+        try {
+            writeStoredFileOrThrow(path, rawBytes);
             return true;
         } catch (IOException e) {
             System.err.println("Error writing stored file at '" + path + "': " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Explicitly writes a Huffman-compressed file with mode flag 1 (MODE_HUFFMAN), throwing on error.
+     *
+     * @param path            destination path for the .huff file
+     * @param frequencies     character frequency table
+     * @param paddingBits     number of padding bits in the last byte
+     * @param compressedBytes compressed payload bytes
+     * @throws IOException if writing fails
+     */
+    public static void writeHuffmanFileOrThrow(String path, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) throws IOException {
+        try (FileOutputStream fos = new FileOutputStream(path);
+             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
+            writeHuffmanData(bos, frequencies, paddingBits, compressedBytes);
         }
     }
 
@@ -230,30 +411,8 @@ public class FileHandler {
      * @return true if file was written successfully, false otherwise
      */
     public static boolean writeHuffmanFile(String path, Map<Character, Integer> frequencies, int paddingBits, byte[] compressedBytes) {
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(path)))) {
-            // 1. Write mode flag (Flag 1)
-            out.writeByte(MODE_HUFFMAN);
-
-            // 2. Write unique character count
-            out.writeInt(frequencies == null ? 0 : frequencies.size());
-
-            // 3. Write character and varint frequency pairs
-            if (frequencies != null) {
-                for (Map.Entry<Character, Integer> entry : frequencies.entrySet()) {
-                    out.writeChar(entry.getKey());
-                    writeVarInt(out, entry.getValue());
-                }
-            }
-
-            // 4. Write padding bits count
-            out.writeInt(paddingBits);
-
-            // 5. Write payload length and packed bytes
-            out.writeInt(compressedBytes == null ? 0 : compressedBytes.length);
-            if (compressedBytes != null && compressedBytes.length > 0) {
-                out.write(compressedBytes);
-            }
-
+        try {
+            writeHuffmanFileOrThrow(path, frequencies, paddingBits, compressedBytes);
             return true;
         } catch (IOException e) {
             System.err.println("Error writing Huffman file at '" + path + "': " + e.getMessage());
@@ -301,6 +460,150 @@ public class FileHandler {
     }
 
     /**
+     * Reads and parses a compressed .huff stream with comprehensive validation.
+     *
+     * @param in            the input stream
+     * @param totalByteSize total byte size of the stream if known (or -1 if unknown)
+     * @param sourceName    descriptive name of the stream/file for error reporting
+     * @return parsed {@link CompressedFileData}
+     * @throws IOException      if stream reading fails
+     * @throws HuffmanException if corrupted or invalid .huff formatting is detected
+     */
+    public static CompressedFileData readCompressedStream(InputStream in, long totalByteSize, String sourceName) throws IOException, HuffmanException {
+        if (totalByteSize == 0) {
+            throw new HuffmanException("File '" + sourceName + "' is empty (0 bytes). A valid .huff file requires at least a 1-byte mode flag.");
+        }
+
+        DataInputStream dataIn = (in instanceof DataInputStream dis) ? dis : new DataInputStream(in);
+
+        // Read 1-byte mode flag
+        int modeByte = dataIn.read();
+        if (modeByte == -1) {
+            throw new HuffmanException("Unexpected end of file while reading mode flag in '" + sourceName + "'.");
+        }
+
+        if (modeByte == MODE_STORED) {
+            // Read all remaining bytes as raw UTF-8 payload
+            byte[] rawBytes = dataIn.readAllBytes();
+            return new CompressedFileData(MODE_STORED, rawBytes, null, 0, null, 1);
+        } else if (modeByte == MODE_HUFFMAN) {
+            // 1. Read unique character count
+            int uniqueCount;
+            try {
+                uniqueCount = dataIn.readInt();
+            } catch (EOFException e) {
+                throw new HuffmanException("Truncated header in '" + sourceName + "'. Missing unique character count.", e);
+            }
+
+            if (uniqueCount < 0 || uniqueCount > 65536) {
+                throw new HuffmanException("Corrupted header in '" + sourceName + "'. Invalid unique character count: " + uniqueCount + ".");
+            }
+
+            Map<Character, Integer> frequencies = new HashMap<>();
+
+            // 2. Read each 2-byte character and varint frequency pair
+            for (int i = 0; i < uniqueCount; i++) {
+                char c;
+                int freq;
+                try {
+                    c = dataIn.readChar();
+                    freq = readVarInt(dataIn);
+                } catch (EOFException e) {
+                    throw new HuffmanException("Truncated header in '" + sourceName + "'. Premature EOF while reading character/frequency entry " + (i + 1) + " of " + uniqueCount + ".", e);
+                } catch (IllegalArgumentException e) {
+                    throw new HuffmanException("Corrupted varint frequency in '" + sourceName + "': " + e.getMessage(), e);
+                }
+
+                if (freq <= 0) {
+                    throw new HuffmanException("Corrupted frequency (" + freq + ") for character " + FrequencyCounter.formatChar(c) + " in '" + sourceName + "'. Frequencies must be positive integers.");
+                }
+                frequencies.put(c, freq);
+            }
+
+            // 3. Read padding bit count
+            int paddingBits;
+            try {
+                paddingBits = dataIn.readInt();
+            } catch (EOFException e) {
+                throw new HuffmanException("Truncated header in '" + sourceName + "'. Missing padding bits count.", e);
+            }
+
+            if (paddingBits < 0 || paddingBits > 7) {
+                throw new HuffmanException("Corrupted padding bits count (" + paddingBits + ") in '" + sourceName + "'. Expected value between 0 and 7.");
+            }
+
+            // 4. Read payload byte length and data
+            int byteLength;
+            try {
+                byteLength = dataIn.readInt();
+            } catch (EOFException e) {
+                throw new HuffmanException("Truncated header in '" + sourceName + "'. Missing payload length.", e);
+            }
+
+            if (byteLength < 0) {
+                throw new HuffmanException("Corrupted payload length (" + byteLength + ") in '" + sourceName + "'.");
+            }
+
+            byte[] compressedBytes = new byte[byteLength];
+            try {
+                dataIn.readFully(compressedBytes);
+            } catch (EOFException e) {
+                throw new HuffmanException("Truncated payload in '" + sourceName + "'. Expected " + byteLength + " bytes, but file ended prematurely.", e);
+            }
+
+            int headerBytes = (totalByteSize >= 0) ? (int) (totalByteSize - byteLength) : -1;
+            return new CompressedFileData(MODE_HUFFMAN, null, frequencies, paddingBits, compressedBytes, headerBytes);
+        } else {
+            throw new HuffmanException("Invalid or unsupported mode flag (" + modeByte + ") in '" + sourceName + "'. Expected 0 (Stored) or 1 (Huffman).");
+        }
+    }
+
+    /**
+     * Reads and parses compressed data from an in-memory byte buffer.
+     *
+     * @param bytes the compressed .huff bytes
+     * @return parsed {@link CompressedFileData}
+     * @throws IOException      if reading fails
+     * @throws HuffmanException if corrupted or invalid data
+     */
+    public static CompressedFileData readCompressedBytes(byte[] bytes) throws IOException, HuffmanException {
+        if (bytes == null || bytes.length == 0) {
+            throw new HuffmanException("Compressed byte buffer is empty (0 bytes). A valid .huff file requires at least a 1-byte mode flag.");
+        }
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(bytes)) {
+            return readCompressedStream(bais, bytes.length, "memory buffer");
+        }
+    }
+
+    /**
+     * Reads a .huff file from disk, detecting the mode flag and throwing exceptions on errors.
+     *
+     * @param path path to the .huff file
+     * @return parsed {@link CompressedFileData}
+     * @throws IOException      if an I/O error occurs
+     * @throws HuffmanException if file is missing, a directory, empty, or corrupted
+     */
+    public static CompressedFileData readCompressedFileOrThrow(String path) throws IOException, HuffmanException {
+        if (path == null || path.isBlank()) {
+            throw new HuffmanException("Path is empty or blank.");
+        }
+        Path filePath = Path.of(path);
+        if (!Files.exists(filePath)) {
+            throw new HuffmanException("File does not exist at '" + path + "'.");
+        }
+        if (Files.isDirectory(filePath)) {
+            throw new HuffmanException("Path is a directory, not a file at '" + path + "'.");
+        }
+
+        long totalFileSize = Files.size(filePath);
+        try (FileInputStream fis = new FileInputStream(filePath.toFile());
+             BufferedInputStream bis = new BufferedInputStream(fis);
+             DataInputStream dis = new DataInputStream(bis)) {
+            return readCompressedStream(dis, totalFileSize, path);
+        }
+    }
+
+    /**
      * Reads a .huff file from disk, detecting the 1-byte mode flag with comprehensive safety checks:
      * - Validates that the file exists, is readable, and is non-empty.
      * - Validates mode flag is either 0 (MODE_STORED) or 1 (MODE_HUFFMAN).
@@ -311,126 +614,11 @@ public class FileHandler {
      * @return parsed {@link CompressedFileData}, or null if corrupted, missing, empty, or unreadable
      */
     public static CompressedFileData readCompressedFile(String path) {
-        if (path == null || path.isBlank()) {
-            System.err.println("Error reading compressed file: Path is empty or blank.");
-            return null;
-        }
-        Path filePath = Path.of(path);
-        if (!Files.exists(filePath)) {
-            System.err.println("Error reading compressed file: File does not exist at '" + path + "'.");
-            return null;
-        }
-        if (Files.isDirectory(filePath)) {
-            System.err.println("Error reading compressed file: Path is a directory, not a file at '" + path + "'.");
-            return null;
-        }
-
-        long totalFileSize;
         try {
-            totalFileSize = Files.size(filePath);
-        } catch (IOException e) {
-            System.err.println("Error checking compressed file size at '" + path + "': " + e.getMessage());
+            return readCompressedFileOrThrow(path);
+        } catch (HuffmanException e) {
+            System.err.println("Error reading compressed file: " + e.getMessage());
             return null;
-        }
-
-        if (totalFileSize == 0) {
-            System.err.println("Error reading compressed file: File '" + path + "' is empty (0 bytes). A valid .huff file requires at least a 1-byte mode flag.");
-            return null;
-        }
-
-        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(filePath.toFile())))) {
-            // Read 1-byte mode flag
-            int modeByte = in.read();
-            if (modeByte == -1) {
-                System.err.println("Error reading compressed file: Unexpected end of file while reading mode flag in '" + path + "'.");
-                return null;
-            }
-
-            if (modeByte == MODE_STORED) {
-                // Read all remaining bytes as raw UTF-8 payload
-                byte[] rawBytes = in.readAllBytes();
-                return new CompressedFileData(MODE_STORED, rawBytes, null, 0, null, 1);
-            } else if (modeByte == MODE_HUFFMAN) {
-                // 1. Read unique character count
-                int uniqueCount;
-                try {
-                    uniqueCount = in.readInt();
-                } catch (EOFException e) {
-                    System.err.println("Error reading compressed file: Truncated header in '" + path + "'. Missing unique character count.");
-                    return null;
-                }
-
-                if (uniqueCount < 0 || uniqueCount > 65536) {
-                    System.err.println("Error reading compressed file: Corrupted header in '" + path + "'. Invalid unique character count: " + uniqueCount + ".");
-                    return null;
-                }
-
-                Map<Character, Integer> frequencies = new HashMap<>();
-
-                // 2. Read each 2-byte character and varint frequency pair
-                for (int i = 0; i < uniqueCount; i++) {
-                    char c;
-                    int freq;
-                    try {
-                        c = in.readChar();
-                        freq = readVarInt(in);
-                    } catch (EOFException e) {
-                        System.err.println("Error reading compressed file: Truncated header in '" + path + "'. Premature EOF while reading character/frequency entry " + (i + 1) + " of " + uniqueCount + ".");
-                        return null;
-                    } catch (IllegalArgumentException e) {
-                        System.err.println("Error reading compressed file: Corrupted varint frequency in '" + path + "': " + e.getMessage());
-                        return null;
-                    }
-
-                    if (freq <= 0) {
-                        System.err.println("Error reading compressed file: Corrupted frequency (" + freq + ") for character " + FrequencyCounter.formatChar(c) + " in '" + path + "'. Frequencies must be positive integers.");
-                        return null;
-                    }
-                    frequencies.put(c, freq);
-                }
-
-                // 3. Read padding bit count
-                int paddingBits;
-                try {
-                    paddingBits = in.readInt();
-                } catch (EOFException e) {
-                    System.err.println("Error reading compressed file: Truncated header in '" + path + "'. Missing padding bits count.");
-                    return null;
-                }
-
-                if (paddingBits < 0 || paddingBits > 7) {
-                    System.err.println("Error reading compressed file: Corrupted padding bits count (" + paddingBits + ") in '" + path + "'. Expected value between 0 and 7.");
-                    return null;
-                }
-
-                // 4. Read payload byte length and data
-                int byteLength;
-                try {
-                    byteLength = in.readInt();
-                } catch (EOFException e) {
-                    System.err.println("Error reading compressed file: Truncated header in '" + path + "'. Missing payload length.");
-                    return null;
-                }
-
-                if (byteLength < 0) {
-                    System.err.println("Error reading compressed file: Corrupted payload length (" + byteLength + ") in '" + path + "'.");
-                    return null;
-                }
-
-                byte[] compressedBytes = new byte[byteLength];
-                try {
-                    in.readFully(compressedBytes);
-                } catch (EOFException e) {
-                    System.err.println("Error reading compressed file: Truncated payload in '" + path + "'. Expected " + byteLength + " bytes, but file ended prematurely.");
-                    return null;
-                }
-
-                int headerBytes = (int) (totalFileSize - byteLength);
-                return new CompressedFileData(MODE_HUFFMAN, null, frequencies, paddingBits, compressedBytes, headerBytes);
-            } else {
-                System.err.println("Error reading compressed file: Invalid or unsupported mode flag (" + modeByte + ") in '" + path + "'. Expected 0 (Stored) or 1 (Huffman).");
-                return null;
-            }
         } catch (IOException e) {
             System.err.println("Error reading compressed file at '" + path + "': " + e.getMessage());
             return null;

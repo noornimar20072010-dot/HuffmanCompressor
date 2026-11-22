@@ -10,18 +10,16 @@ import java.nio.charset.StandardCharsets;
 public class Decompressor {
 
     /**
-     * Decompresses data directly from a parsed {@link FileHandler.CompressedFileData} instance.
-     * Evaluates the 1-byte mode flag:
-     * - Flag 0: Decodes the raw UTF-8 bytes directly.
-     * - Flag 1: Reconstructs the Huffman tree from the varint frequency header and walks bits.
+     * Decompresses data directly from a parsed {@link FileHandler.CompressedFileData} instance,
+     * throwing a {@link HuffmanException} on corrupted or invalid input.
      *
      * @param fileData parsed compressed file data
-     * @return original decoded text, or null if decompression fails
+     * @return original decoded text
+     * @throws HuffmanException if fileData is null, missing frequency table, or corrupted
      */
-    public static String decompress(FileHandler.CompressedFileData fileData) {
+    public static String decompressOrThrow(FileHandler.CompressedFileData fileData) throws HuffmanException {
         if (fileData == null) {
-            System.err.println("Decompression error: Provided compressed file data is null.");
-            return null;
+            throw new HuffmanException("Provided compressed file data is null.");
         }
 
         // Mode 0: Stored uncompressed
@@ -32,27 +30,47 @@ public class Decompressor {
 
         // Mode 1: Huffman compressed
         if (fileData.frequencies() == null) {
-            System.err.println("Decompression error: Missing frequency table for Huffman mode.");
-            return null;
+            throw new HuffmanException("Missing frequency table for Huffman mode.");
         }
 
         HuffmanTree rebuiltTree = new HuffmanTree(fileData.frequencies());
-        return decompress(fileData.compressedBytes(), fileData.paddingBits(), rebuiltTree);
+        return decompressOrThrow(fileData.compressedBytes(), fileData.paddingBits(), rebuiltTree);
     }
 
     /**
-     * Decompresses packed bytes back into the original string by walking the Huffman tree.
-     * Guards against corrupted bitstreams without throwing uncaught exceptions.
+     * Decompresses data directly from a parsed {@link FileHandler.CompressedFileData} instance.
+     * Evaluates the 1-byte mode flag:
+     * - Flag 0: Decodes the raw UTF-8 bytes directly.
+     * - Flag 1: Reconstructs the Huffman tree from the varint frequency header and walks bits.
+     *
+     * @param fileData parsed compressed file data
+     * @return original decoded text, or null if decompression fails
+     */
+    public static String decompress(FileHandler.CompressedFileData fileData) {
+        try {
+            return decompressOrThrow(fileData);
+        } catch (HuffmanException e) {
+            System.err.println("Decompression error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Decompresses packed bytes back into the original string by walking the Huffman tree,
+     * throwing a {@link HuffmanException} on corrupted bitstreams.
      *
      * @param compressedBytes byte array holding the packed bits
      * @param paddingBits     number of padding bits at the end of the last byte to ignore
      * @param tree            the HuffmanTree used to decode bits
-     * @return original decoded text, or null if corrupted
+     * @return original decoded text
+     * @throws HuffmanException if corrupted or invalid tree/bytes
      */
-    public static String decompress(byte[] compressedBytes, int paddingBits, HuffmanTree tree) {
+    public static String decompressOrThrow(byte[] compressedBytes, int paddingBits, HuffmanTree tree) throws HuffmanException {
         if (tree == null || tree.getRoot() == null) {
-            // Tree is empty (e.g. empty file in Huffman mode)
-            return (compressedBytes == null || compressedBytes.length == 0) ? "" : null;
+            if (compressedBytes != null && compressedBytes.length > 0) {
+                throw new HuffmanException("Empty tree with non-empty payload cannot be decompressed.");
+            }
+            return "";
         }
 
         if (compressedBytes == null || compressedBytes.length == 0) {
@@ -85,8 +103,7 @@ public class Decompressor {
             current = (bit == 0) ? current.left : current.right;
 
             if (current == null) {
-                System.err.println("Decompression error: Corrupted bitstream encountered at bit position " + i + ". Invalid branch taken.");
-                return null;
+                throw new HuffmanException("Corrupted bitstream encountered at bit position " + i + ". Invalid branch taken.");
             }
 
             if (current.isLeaf()) {
@@ -96,5 +113,23 @@ public class Decompressor {
         }
 
         return decodedText.toString();
+    }
+
+    /**
+     * Decompresses packed bytes back into the original string by walking the Huffman tree.
+     * Guards against corrupted bitstreams without throwing uncaught exceptions.
+     *
+     * @param compressedBytes byte array holding the packed bits
+     * @param paddingBits     number of padding bits at the end of the last byte to ignore
+     * @param tree            the HuffmanTree used to decode bits
+     * @return original decoded text, or null if corrupted
+     */
+    public static String decompress(byte[] compressedBytes, int paddingBits, HuffmanTree tree) {
+        try {
+            return decompressOrThrow(compressedBytes, paddingBits, tree);
+        } catch (HuffmanException e) {
+            System.err.println("Decompression error: " + e.getMessage());
+            return null;
+        }
     }
 }

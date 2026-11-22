@@ -48,6 +48,34 @@ public class HuffmanNode implements Comparable<HuffmanNode> {
     }
 
     /**
+     * @return the character stored in this node, or null for internal routing nodes
+     */
+    public Character getCharacter() {
+        return character;
+    }
+
+    /**
+     * @return the occurrence frequency of this node
+     */
+    public int getFrequency() {
+        return frequency;
+    }
+
+    /**
+     * @return the left child node ('0' branch), or null if leaf
+     */
+    public HuffmanNode getLeft() {
+        return left;
+    }
+
+    /**
+     * @return the right child node ('1' branch), or null if leaf
+     */
+    public HuffmanNode getRight() {
+        return right;
+    }
+
+    /**
      * Orders nodes by ascending frequency for use in a PriorityQueue (min-heap).
      *
      * @param other the other HuffmanNode to compare against
