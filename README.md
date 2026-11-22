@@ -1,16 +1,46 @@
 # HuffmanCompressor
 
-A complete, robust, self-contained **Java 17** implementation of the Huffman text compression and decompression engine built with **zero external libraries** and **no build tools**.
+A complete, robust, self-contained **Java 17** implementation of the Huffman text compression and decompression engine built with **zero external libraries** and **no build tools** (plain `javac`). Features dual interfaces (Java Swing GUI and Console CLI), an in-memory service architecture, and an automated 29-test validation suite.
+
+---
+
+## Features
+
+- **Dual Graphical & CLI Interfaces**: Launch either a rich Java Swing desktop GUI (`GuiMain`) or an interactive terminal menu (`Main`).
+- **In-Memory Service Layer**: `HuffmanService` provides non-blocking, thread-safe methods for in-memory compression, decompression, structural analysis, and automatic round-trip verification (`HuffmanResult`).
+- **Interactive Visualizations**:
+  - **Code Table**: Sortable `JTable` displaying character glyphs, frequencies, variable-length binary prefix codes, and code lengths.
+  - **Huffman Tree**: Custom zoomable and scrollable binary tree canvas with labeled branches (`0` left, `1` right), character/frequency leaves, and combined internal nodes.
+  - **Frequency Chart**: Clean bar chart of top 20 character frequencies with exact counts and percentages.
+  - **Live Statistics**: Real-time breakdown of original size, compressed size, metadata header size, payload size, compression ratio, space saved %, and round-trip verification status.
+- **Dual-Mode File Storage**:
+  - **Flag 1 (Huffman Mode)**: Compresses text using optimal prefix codes when net disk savings are achieved.
+  - **Flag 0 (Stored Mode)**: Stores raw UTF-8 bytes when Huffman metadata overhead would exceed payload savings, ensuring files never expand by more than 1 byte (the mode flag overhead).
+- **Varint Metadata Encoding**: Frequency table entries are encoded using unsigned 7-bit variable-length integers (1–5 bytes) instead of standard 4-byte integers, minimizing header overhead.
+- **Asynchronous SwingWorker Architecture**: Long-running operations run in the background, keeping the user interface completely responsive on large inputs.
+- **Robust Safety & Corruption Guards**: Built-in validation guarding against 0-byte files, truncated headers, missing files, corrupted bitstreams, and division-by-zero on empty inputs.
 
 ---
 
 ## How Huffman Coding Works in Simple Words
 
-1. **Count Frequencies**: Count how many times each character appears in the text.
-2. **Build a Min-Heap**: Treat every character as a standalone leaf node and place them into a priority queue sorted from lowest to highest frequency.
-3. **Merge Bottom-Up**: Take the two nodes with the lowest counts, join them under a new parent node whose count is their sum, and insert the parent back into the queue. Repeat until one root node remains.
-4. **Assign Binary Codes**: Starting from the root, going left adds a `0` and going right adds a `1`. Characters that appear frequently (like space or `'e'`) end up near the top with very short codes (e.g. 2–3 bits), while rare characters end up deeper with longer codes.
-5. **Pack Bits & Save Dual-Mode Header**: Pack the variable-length bits into 8-bit bytes. If the prospective compressed file (header + payload) is smaller than the original text, save it with **Flag 1 (Huffman Mode)**; otherwise save the raw UTF-8 bytes with **Flag 0 (Stored Mode)** so files never expand unnecessarily.
+1. **Count Frequencies**: Count how many times each character appears in the text ($O(n)$ time).
+2. **Build a Min-Heap**: Treat every unique character as a standalone leaf node and place them into a priority queue ordered by ascending frequency.
+3. **Merge Bottom-Up**: Repeatedly remove the two lowest-frequency nodes, join them under a new parent node whose frequency is their sum, and reinsert the parent back into the queue. Repeat until one root node remains ($O(k \log k)$ time for $k$ unique characters).
+4. **Assign Binary Codes**: Starting from the root, going left adds a `0` and going right adds a `1`. Frequent characters (such as space or `'e'`) remain near the top with short codes (2–4 bits), while rare characters end up deeper with longer codes.
+5. **Pack Bits & Save Dual-Mode Header**: Pack the variable-length bits into 8-bit bytes. If the prospective compressed file (header + payload) is smaller than the original text, save it with **Flag 1 (Huffman Mode)**; otherwise save the raw UTF-8 bytes with **Flag 0 (Stored Mode)** so files never expand by more than 1 byte.
+
+---
+
+## Time and Space Complexity
+
+- **Frequency Counting**: $\mathcal{O}(n)$, where $n$ is the total number of characters in the input text. Performs a single linear pass over the text.
+- **Tree Construction**: $\mathcal{O}(k \log k)$, where $k$ is the number of unique characters ($k \le 65{,}536$, typically $k \le 128$ for English/ASCII). The min-heap (`PriorityQueue`) holds $k$ elements, and each of the $k-1$ merge operations takes $\mathcal{O}(\log k)$ time.
+- **Prefix Code Generation**: $\mathcal{O}(k)$, recursively traversing the $2k-1$ nodes of the Huffman tree.
+- **Bitstream Encoding**: $\mathcal{O}(n)$, replacing each character with its precomputed binary code string and bit-packing into bytes.
+- **Decompression**: $\mathcal{O}(n)$, walking down the binary tree from the root for each bit in the payload to restore the original character.
+- **Overall Time Complexity**: $\mathcal{O}(n + k \log k)$, which runs in near-linear time with respect to the input text size.
+- **Space Complexity**: $\mathcal{O}(k)$ auxiliary memory for the tree and frequency tables, and $\mathcal{O}(n)$ memory for the input and output byte arrays.
 
 ---
 
@@ -20,21 +50,28 @@ A complete, robust, self-contained **Java 17** implementation of the Huffman tex
 HuffmanCompressor/
 ├── src/
 │   └── huffman/
-│       ├── CodeGenerator.java     # Recursive tree traversal generating prefix codes
-│       ├── CompressionStats.java  # Metrics calculation (ratios, space saved, zero-guard)
-│       ├── Compressor.java        # Encodes text into bit strings and packs them into bytes
-│       ├── Decompressor.java      # Restores text from Huffman bitstream or Stored UTF-8 bytes
-│       ├── FileHandler.java       # Dual-mode .huff I/O, varint encoding, and corruption guards
-│       ├── FrequencyCounter.java  # Character occurrence frequency counter
-│       ├── HuffmanNode.java       # Binary tree node (character, frequency, left, right)
-│       ├── HuffmanTree.java       # Tree builder using PriorityQueue (handles edge cases)
-│       ├── Main.java              # Interactive CLI menu loop (validate input, resilient to bad paths)
-│       └── Tests.java             # Comprehensive 22-test validation suite (no JUnit)
-├── input.txt                      # Short sample text file (319 bytes)
-├── natural_input.txt              # Authentic natural English prose (~42 KB from Arthur Conan Doyle)
-├── big_input.txt                  # Synthetic test file (~40 KB) exercising 3-byte varint frequencies
-├── .gitignore                     # Git ignore rules (bin/, *.huff, temp files)
-└── README.md                      # Complete documentation and usage guide
+│       ├── CodeGenerator.java        # Recursive tree traversal generating prefix codes
+│       ├── CompressionStats.java     # Metrics calculation (ratios, space saved, zero-guard)
+│       ├── Compressor.java           # Encodes text into bit strings and packs them into bytes
+│       ├── Decompressor.java         # Restores text from Huffman bitstream or Stored UTF-8 bytes
+│       ├── FileHandler.java          # Dual-mode .huff I/O, varint encoding, shared streaming, and corruption guards
+│       ├── FrequencyChartPanel.java  # Custom Swing JPanel rendering top 20 character frequencies bar chart
+│       ├── FrequencyCounter.java     # Character occurrence frequency counter
+│       ├── GuiMain.java              # Entry point for the Swing Graphical User Interface
+│       ├── HuffmanException.java     # Custom exception for typed compression/decompression error reporting
+│       ├── HuffmanNode.java          # Binary tree node (character, frequency, left, right, getters)
+│       ├── HuffmanResult.java        # Immutable data container for compression results and verification
+│       ├── HuffmanService.java       # High-level in-memory facade for compression, analysis, and file helpers
+│       ├── HuffmanTree.java          # Tree builder using PriorityQueue (handles edge cases)
+│       ├── Main.java                 # Interactive CLI menu loop (resilient to bad paths and inputs)
+│       ├── MainFrame.java            # Main Swing window with toolbar, split view, tabs, and status bar
+│       ├── Tests.java                # Comprehensive 29-test validation suite (no JUnit)
+│       └── TreePanel.java            # Custom Swing JPanel rendering the Huffman tree with zoom controls
+├── input.txt                         # Short sample text file (319 bytes)
+├── natural_input.txt                 # Authentic natural English prose (~42 KB from Arthur Conan Doyle)
+├── big_input.txt                     # Synthetic test file (~40 KB) exercising 3-byte varint frequencies
+├── .gitignore                        # Git ignore rules (bin/, *.huff, temp files)
+└── README.md                         # Complete documentation and usage guide
 ```
 
 ---
@@ -78,12 +115,17 @@ From the project root directory (`HuffmanCompressor/`):
 javac -Xlint:all -d bin src/huffman/*.java
 ```
 
-### 2. Run Interactive Menu
+### 2. Run Graphical User Interface (GUI)
+```powershell
+java -cp bin huffman.GuiMain
+```
+
+### 3. Run Interactive Console Menu (CLI)
 ```powershell
 java -cp bin huffman.Main
 ```
 
-### 3. Run Automated Test Suite
+### 4. Run Automated Test Suite (29 Tests)
 ```powershell
 java -cp bin huffman.Tests
 ```
@@ -92,7 +134,7 @@ java -cp bin huffman.Tests
 
 ## Full Test Suite Output
 
-Running `java -cp bin huffman.Tests` executes 22 automated validation tests across 5 categories:
+Running `java -cp bin huffman.Tests` executes 29 automated validation tests across 6 categories:
 
 ```
 =================================================
@@ -135,8 +177,17 @@ Error reading compressed file: Truncated header in 'test_temp\truncated.huff'. P
 Safety: Truncated header returns null                      [PASS] - Handled safely without crashing
 Safety: CompressionStats division-by-zero guard            [PASS] - No NaN or Infinity present
 
+--- Part 6: HuffmanService In-Memory Validation ---
+Service: Round-trip normal text (Huffman Mode)             [PASS] - Verified Flag 1! 504 chars -> 336 bytes (Saved: 33.33%)
+Service: Round-trip empty text (Stored Mode)               [PASS] - Verified empty text round-trip (Flag 0 Stored, 1 byte)
+Service: Round-trip one-character text (Stored Mode)       [PASS] - Verified single char round-trip ('A' restored exactly, Flag 0)
+Service: Round-trip Unicode & emoji (Huffman Mode)         [PASS] - Verified Flag 1! 675 chars (1020 B -> 502 B, Saved: 50.78%)
+Service: HuffmanResult values match CompressionStats       [PASS] - Parity verified (Flag 1, Ratio: 0.6920, Saved: 30.80%)
+Service: natural_input.txt benchmark (expect 24,363 B)     [PASS] - Byte-for-byte match! Orig: 42,967 B, Comp: 24,363 B (expected 24,363 B), Saved: 43.30%
+Service: Corrupt byte[] throws HuffmanException            [PASS] - Caught expected HuffmanException: Invalid or unsupported mode flag (99) in 'memory buffer'. Expected 0 (Stored) or 1 (Huffman).
+
 -------------------------------------------------
-Test Summary: 22 / 22 passed.
+Test Summary: 29 / 29 passed.
 ALL TESTS PASSED SUCCESSFULLY! [PASS]
 -------------------------------------------------
 ```
@@ -156,7 +207,9 @@ ALL TESTS PASSED SUCCESSFULLY! [PASS]
 | **Compression Ratio** | **0.8652 (86.52%)** | **0.5670 (56.70%)** | **0.4646 (46.46%)** |
 | **Space Saved** | **13.48%** | **43.30%** | **53.54%** |
 
+> **Note on Line Endings (CRLF vs. LF)**: On Windows systems, text files cloned or created with Windows-style CRLF (`\r\n`) line endings consume 2 bytes per line break instead of 1 byte (LF `\n`). Consequently, `input.txt` may measure 323 bytes rather than 319 bytes, and its exact compression ratio may slightly differ (~85.4% vs. 86.5%) from the Unix-standard LF benchmark table above.
+
 ### Benchmark Analysis: Natural English vs. Small & Synthetic Files
-- **Natural English (`natural_input.txt`)**: Represents realistic performance on natural English literature. Character distributions follow standard English letter frequencies, resulting in a typical Huffman space savings of **43.30%** (compression ratio of `0.5670`).
+- **Natural English (`natural_input.txt`)**: Represents realistic performance on authentic English literature. Character distributions follow standard English letter frequencies, resulting in a typical Huffman space savings of **43.30%** (compression ratio of `0.5670`).
 - **Short Sample (`input.txt`)**: For short files (319 bytes), the 106-byte dictionary header accounts for **33.2%** of the original size. Although the payload itself shrinks by 46.75%, the fixed metadata overhead leaves a net file saving of **13.48%**. For files smaller than ~25 bytes, this overhead exceeds bit savings entirely, triggering **Stored Mode (Flag 0)**.
 - **Synthetic Test (`big_input.txt`)**: Specifically designed to stress-test 3-byte varint deserialization by deliberately inflating space occurrence to 16,797 ($\ge 16,384$). Because the space character dominates over 40% of the text, it is assigned a very short Huffman code (1–2 bits), yielding an artificially high compression ratio (53.54%) compared to natural English.
