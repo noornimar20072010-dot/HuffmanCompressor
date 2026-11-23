@@ -56,6 +56,7 @@ public final class MainFrame extends JFrame {
 
     // UI Components
     private JLabel editorTitleLabel;
+    private JLabel loadedFileInfoLabel;
     private JTextArea inputTextArea;
     private JTable codeTable;
     private DefaultTableModel codeTableModel;
@@ -63,6 +64,8 @@ public final class MainFrame extends JFrame {
     private FrequencyChartPanel chartPanel;
     private JPanel statusPanel;
     private JLabel statusLabel;
+    private JButton btnDecompress;
+    private JMenuItem decompressMenuItem;
 
     // Statistics Components - Compression
     private JLabel lblOriginalSize;
@@ -133,6 +136,18 @@ public final class MainFrame extends JFrame {
 
         // 4. Bottom Status Bar
         add(createStatusBar(), BorderLayout.SOUTH);
+
+        // Initial state: Decompress is disabled until .huff or compressed data is loaded
+        setDecompressEnabled(false);
+    }
+
+    private void setDecompressEnabled(boolean enabled) {
+        if (btnDecompress != null) {
+            btnDecompress.setEnabled(enabled);
+        }
+        if (decompressMenuItem != null) {
+            decompressMenuItem.setEnabled(enabled);
+        }
     }
 
     private JMenuBar createMenuBar() {
@@ -180,9 +195,9 @@ public final class MainFrame extends JFrame {
         compressItem.addActionListener(e -> handleCompress());
         actionMenu.add(compressItem);
 
-        JMenuItem decompressItem = new JMenuItem("Decompress In-Memory Data");
-        decompressItem.addActionListener(e -> handleDecompress());
-        actionMenu.add(decompressItem);
+        decompressMenuItem = new JMenuItem("Decompress In-Memory Data");
+        decompressMenuItem.addActionListener(e -> handleDecompress());
+        actionMenu.add(decompressMenuItem);
 
         JMenuItem compareItem = new JMenuItem("Compare with Original...");
         compareItem.addActionListener(e -> handleCompareWithOriginal());
@@ -227,10 +242,10 @@ public final class MainFrame extends JFrame {
         JButton btnSaveHuff = createToolbarButton("Save Compressed (.huff)", "Save compressed binary .huff file to disk", false, false);
         btnSaveHuff.addActionListener(e -> handleSaveHuffFile());
 
-        JButton btnOpenHuff = createToolbarButton("Open Compressed (.huff)", "Open and decompress a binary .huff file from disk", false, false);
+        JButton btnOpenHuff = createToolbarButton("Open Compressed (.huff)", "Load a compressed binary .huff file from disk into memory", false, false);
         btnOpenHuff.addActionListener(e -> handleOpenHuffFile());
 
-        JButton btnDecompress = createToolbarButton("Decompress", "Decompress current in-memory binary payload back to text", false, true);
+        btnDecompress = createToolbarButton("Decompress", "Decompress loaded .huff binary payload back to text", false, true);
         btnDecompress.addActionListener(e -> handleDecompress());
 
         JButton btnSaveRestored = createToolbarButton("Save Text", "Save current editor text to disk as a .txt file", false, false);
@@ -309,6 +324,25 @@ public final class MainFrame extends JFrame {
                 BorderFactory.createEmptyBorder(6, 12, 6, 12)
         ));
 
+        btn.addPropertyChangeListener("enabled", evt -> {
+            boolean enabled = (Boolean) evt.getNewValue();
+            if (!enabled) {
+                btn.setBackground(new Color(233, 236, 239));
+                btn.setForeground(new Color(140, 145, 150));
+                btn.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(new Color(222, 226, 230), 1, true),
+                        BorderFactory.createEmptyBorder(6, 12, 6, 12)
+                ));
+            } else {
+                btn.setBackground(bgNormal);
+                btn.setForeground(fgNormal);
+                btn.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(borderColor, 1, true),
+                        BorderFactory.createEmptyBorder(6, 12, 6, 12)
+                ));
+            }
+        });
+
         btn.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
@@ -319,7 +353,9 @@ public final class MainFrame extends JFrame {
 
             @Override
             public void mouseExited(MouseEvent e) {
-                btn.setBackground(bgNormal);
+                if (btn.isEnabled()) {
+                    btn.setBackground(bgNormal);
+                }
             }
         });
 
@@ -330,10 +366,19 @@ public final class MainFrame extends JFrame {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
+        JPanel headerPanel = new JPanel(new BorderLayout(8, 0));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 2, 6, 2));
+
         editorTitleLabel = new JLabel("Text Source (Type, paste, or load text):");
         editorTitleLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
-        editorTitleLabel.setBorder(BorderFactory.createEmptyBorder(0, 2, 6, 0));
-        panel.add(editorTitleLabel, BorderLayout.NORTH);
+        headerPanel.add(editorTitleLabel, BorderLayout.WEST);
+
+        loadedFileInfoLabel = new JLabel("");
+        loadedFileInfoLabel.setFont(new Font("SansSerif", Font.BOLD, 11));
+        loadedFileInfoLabel.setForeground(new Color(13, 110, 253));
+        headerPanel.add(loadedFileInfoLabel, BorderLayout.EAST);
+
+        panel.add(headerPanel, BorderLayout.NORTH);
 
         inputTextArea = new JTextArea();
         inputTextArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
@@ -617,6 +662,10 @@ public final class MainFrame extends JFrame {
                         String content = get();
                         inputTextArea.setText(content);
                         currentLoadedFileName = selectedFile.getName();
+                        lastCompressedBytes = null;
+                        lastHuffSource = null;
+                        setDecompressEnabled(false);
+                        loadedFileInfoLabel.setText("");
                         editorTitleLabel.setText("Text Source (Type, paste, or load text):");
                         setStatus("Loaded '" + currentLoadedFileName + "' (" + String.format("%,d", content.length()) + " characters)", StatusType.SUCCESS);
                     } catch (Exception ex) {
@@ -656,6 +705,8 @@ public final class MainFrame extends JFrame {
                     lastHuffSource = (currentLoadedFileName.endsWith(".txt")
                             ? currentLoadedFileName.substring(0, currentLoadedFileName.length() - 4)
                             : currentLoadedFileName) + ".huff (in-memory)";
+                    setDecompressEnabled(true);
+                    loadedFileInfoLabel.setText("");
                     updateVisualizations(result);
 
                     String modeStr = (result.getMode() == FileHandler.MODE_STORED) ? "Stored Mode" : "Huffman Mode";
@@ -722,37 +773,47 @@ public final class MainFrame extends JFrame {
 
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             File selectedFile = chooser.getSelectedFile();
-            setBusy(true, "Opening and decompressing " + selectedFile.getName() + "...");
+            setBusy(true, "Reading " + selectedFile.getName() + "...");
 
-            new SwingWorker<DecompExecution, Void>() {
+            new SwingWorker<byte[], Void>() {
                 @Override
-                protected DecompExecution doInBackground() throws Exception {
-                    long t0 = System.currentTimeMillis();
-                    byte[] bytes = huffmanService.readHuffFile(selectedFile.getAbsolutePath());
-                    HuffmanResult result = huffmanService.decompressWithResult(bytes);
-                    long elapsed = System.currentTimeMillis() - t0;
-                    return new DecompExecution(result, elapsed);
+                protected byte[] doInBackground() throws Exception {
+                    return huffmanService.readHuffFile(selectedFile.getAbsolutePath());
                 }
 
                 @Override
                 protected void done() {
                     setBusy(false, null);
                     try {
-                        DecompExecution exec = get();
-                        HuffmanResult result = exec.result;
-                        long elapsedMs = exec.elapsedMs;
-
-                        lastCompressedBytes = result.getCompressedBytes();
-                        inputTextArea.setText(result.getOriginalText());
+                        byte[] bytes = get();
+                        if (bytes == null || bytes.length == 0) {
+                            throw new HuffmanException("File '" + selectedFile.getName() + "' is empty (0 bytes).");
+                        }
+                        lastCompressedBytes = bytes;
                         currentLoadedFileName = selectedFile.getName();
                         lastHuffSource = selectedFile.getName();
 
-                        updateVisualizations(result);
-                        updateDecompressionStats(selectedFile.getName(), lastCompressedBytes.length, result.getOriginalText(), result.getMode(), elapsedMs);
-                        editorTitleLabel.setText("Restored text (from " + selectedFile.getName() + ")");
-                        showDecompressResult(selectedFile.getName(), lastCompressedBytes.length, result.getOriginalText(), result.getMode(), elapsedMs);
+                        // Cheaply inspect first byte for mode flag
+                        byte mode = bytes[0];
+                        String modeDesc;
+                        if (mode == FileHandler.MODE_STORED) {
+                            modeDesc = "Stored Mode (Flag 0)";
+                        } else if (mode == FileHandler.MODE_HUFFMAN) {
+                            modeDesc = "Huffman Mode (Flag 1)";
+                        } else {
+                            modeDesc = "Unknown Mode Flag (" + mode + ")";
+                        }
+
+                        // Enable Decompress button
+                        setDecompressEnabled(true);
+
+                        // Show in the small info label and status bar; leave text area & visualizations untouched
+                        String info = selectedFile.getName() + " (" + formatBytes(bytes.length) + ", " + modeDesc + ")";
+                        loadedFileInfoLabel.setText("Loaded .huff: " + info);
+                        setStatus("Loaded compressed file '" + selectedFile.getName() + "' ("
+                                + formatBytes(bytes.length) + ", " + modeDesc + ") - Click 'Decompress' to decode text", StatusType.INFO);
                     } catch (Exception ex) {
-                        showError("Failed to open or decompress .huff file: " + getRootMessage(ex));
+                        showError("Failed to open .huff file: " + getRootMessage(ex));
                     }
                 }
             }.execute();
@@ -763,7 +824,7 @@ public final class MainFrame extends JFrame {
         if (lastCompressedBytes == null || lastCompressedBytes.length == 0) {
             JOptionPane.showMessageDialog(
                     this,
-                    "No compressed data in memory. Please compress text or open a .huff file first.",
+                    "No compressed data in memory. Please open a .huff file or compress text first.",
                     "No Compressed Data",
                     JOptionPane.WARNING_MESSAGE
             );
@@ -793,8 +854,10 @@ public final class MainFrame extends JFrame {
                     updateVisualizations(result);
 
                     String sourceName = (lastHuffSource != null) ? lastHuffSource : "in-memory buffer";
-                    updateDecompressionStats(sourceName, lastCompressedBytes.length, result.getOriginalText(), result.getMode(), elapsedMs);
                     editorTitleLabel.setText("Restored text (from " + sourceName + ")");
+                    loadedFileInfoLabel.setText("");
+
+                    updateDecompressionStats(sourceName, lastCompressedBytes.length, result.getOriginalText(), result.getMode(), elapsedMs);
                     showDecompressResult(sourceName, lastCompressedBytes.length, result.getOriginalText(), result.getMode(), elapsedMs);
                 } catch (Exception ex) {
                     showError("Decompression error: " + getRootMessage(ex));
@@ -922,6 +985,8 @@ public final class MainFrame extends JFrame {
         lastHuffSource = null;
         currentLoadedFileName = "Untitled";
 
+        setDecompressEnabled(false);
+        loadedFileInfoLabel.setText("");
         editorTitleLabel.setText("Text Source (Type, paste, or load text):");
 
         lblOriginalSize.setText("-");
